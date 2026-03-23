@@ -97,6 +97,7 @@ function createReviewJob(): GenerationJob {
       attemptCount: 1,
       repaired: false,
     },
+    manualClipBundle: null,
     reviewPackage: {
       summary: 'Ready for approval.',
       warnings: ['Check the CTA wording.'],

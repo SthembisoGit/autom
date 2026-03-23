@@ -231,6 +231,15 @@ export class SchedulerService {
         topic: run.topic,
       });
 
+      if (job.status === 'waiting_for_manual_clip') {
+        this.repository.completeSchedulerRun(run.id, job.id);
+        this.auditService.info(
+          job.id,
+          `Scheduled run ${run.id} paused for manual clip upload and will continue later.`
+        );
+        return 'completed';
+      }
+
       if (job.status === 'review_pending') {
         this.repository.completeSchedulerRun(run.id, job.id);
         this.auditService.info(

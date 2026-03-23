@@ -30,5 +30,6 @@ export async function cleanupJobArtifacts(runtimePaths: RuntimePaths, jobId: str
   await Promise.all([
     rm(join(runtimePaths.tempDirectory, jobId), { recursive: true, force: true }),
     rm(join(runtimePaths.outputDirectory, jobId), { recursive: true, force: true }),
+    rm(join(runtimePaths.manualClipDirectory, jobId), { recursive: true, force: true }),
   ]);
 }

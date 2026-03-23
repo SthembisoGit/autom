@@ -18,7 +18,7 @@ type ToastRecord = {
   tone: ToastTone;
 };
 
-type ToastInput = Omit<ToastRecord, 'id'>;
+export type ToastInput = Omit<ToastRecord, 'id'>;
 
 type ToastContextValue = {
   toasts: ToastRecord[];

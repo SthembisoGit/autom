@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc -p tsconfig.json",
+    "build": "node --max-old-space-size=4096 ../../node_modules/typescript/bin/tsc -p tsconfig.json",
     "generate:job": "node dist/cli/generate-job.js",
     "generate:job:dev": "tsx src/cli/generate-job.ts",
     "scheduler:tick": "node dist/cli/run-scheduler-tick.js",
@@ -18,7 +18,7 @@
     "reset:dev": "tsx src/cli/reset-local-data.ts",
     "lint": "biome check src tests",
     "test": "tsx --test tests/app.test.ts tests/scheduler.test.ts tests/gemini-provider.test.ts tests/media-providers.test.ts tests/ffmpeg-renderer.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "node --max-old-space-size=4096 ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@autom/config": "file:../../packages/config",

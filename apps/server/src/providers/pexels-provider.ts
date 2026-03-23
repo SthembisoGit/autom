@@ -39,6 +39,7 @@ export class LocalVisualProvider implements VisualProvider {
     profile: ContentProfile;
     jobId: string;
     runtimePaths: RuntimePaths;
+    excludeSceneOrders?: number[];
   }) {
     return {
       selectedVisualQueries: input.scriptPackage.scenes.map((scene) => scene.visualQuery),
@@ -56,6 +57,7 @@ export class PexelsVisualProvider implements VisualProvider {
     profile: ContentProfile;
     jobId: string;
     runtimePaths: RuntimePaths;
+    excludeSceneOrders?: number[];
   }) {
     const warnings: string[] = [];
     const selectedVisualQueries: string[] = [];
@@ -63,6 +65,11 @@ export class PexelsVisualProvider implements VisualProvider {
     const directory = await ensureJobArtifactDirectory(input.runtimePaths, input.jobId, 'visuals');
 
     for (const scene of input.scriptPackage.scenes) {
+      if (input.excludeSceneOrders?.includes(scene.order)) {
+        selectedVisualQueries.push(scene.visualQuery);
+        continue;
+      }
+
       const candidateQueries = buildCandidateQueries(scene, input.profile);
       let selection: {
         query: string;

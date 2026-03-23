@@ -45,7 +45,7 @@ export class JobsService {
     const jobs = this.repository.listJobs();
     const active = jobs
       .filter((job) =>
-        ['drafting', 'review_pending', 'approved'].includes(job.status) ||
+        ['drafting', 'waiting_for_manual_clip', 'review_pending', 'approved'].includes(job.status) ||
         (job.status === 'publish_pending' && hasPendingPublicationWork(job.publicationResults))
       )
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))

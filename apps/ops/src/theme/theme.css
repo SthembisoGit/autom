@@ -415,6 +415,10 @@ select {
   color: var(--color-warning);
 }
 
+.badge-waiting-for-manual-clip {
+  color: var(--color-warning);
+}
+
 .badge-warning {
   color: var(--color-warning);
 }
@@ -437,6 +441,7 @@ select {
 
 .badge-publish-pending,
 .badge-drafting,
+.badge-pending,
 .badge-pending-configuration,
 .badge-pending-processing,
 .badge-disconnected,
@@ -446,6 +451,10 @@ select {
 }
 
 .badge-connected {
+  color: var(--color-success);
+}
+
+.badge-uploaded {
   color: var(--color-success);
 }
 
@@ -749,7 +758,7 @@ select {
 .progress-stepper-track {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 12px;
   align-items: start;
 }
@@ -844,6 +853,52 @@ select {
 
 .progress-stepper-step-pending .progress-stepper-percent {
   color: var(--color-muted);
+}
+
+.manual-clip-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.manual-clip-request {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+}
+
+.manual-clip-request-header h4 {
+  margin: 4px 0 8px;
+  font-size: 1rem;
+}
+
+.manual-clip-prompt {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.manual-clip-upload {
+  display: grid;
+  gap: 12px;
+}
+
+.manual-clip-file {
+  display: grid;
+  gap: 8px;
+}
+
+.manual-clip-file input {
+  padding: 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
 }
 
 .progress-title,

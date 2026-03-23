@@ -2,9 +2,15 @@ import { getEnabledPublisherPlatforms, loadEnv } from '@autom/config';
 import type { Platform } from '@autom/contracts';
 
 import { cleanupJobArtifacts } from '../lib/artifacts.js';
-import { FfmpegRenderer, StubRenderer, createProcessRunner } from '../media/ffmpeg-renderer.js';
+import {
+  FfmpegRenderer,
+  StubRenderer,
+  createProcessRunner,
+  type CommandRunner,
+} from '../media/ffmpeg-renderer.js';
 import { ArtifactsService } from '../modules/artifacts.js';
 import { AuditService } from '../modules/audit.js';
+import { ManualClipsService } from '../modules/manual-clips.js';
 import { JobsService } from '../modules/jobs.js';
 import { ProfilesService } from '../modules/profiles.js';
 import { PublicationsService } from '../modules/publications.js';
@@ -26,20 +32,15 @@ import {
   migrateLegacyDefaultProfile,
 } from './default-profile.js';
 import { ensureRuntimePaths, resolveDatabasePath } from './runtime.js';
-import type {
-  MediaRenderer,
-  Publisher,
-  ScriptProvider,
-  VisualProvider,
-  VoiceProvider,
-} from './types.js';
+import type { MediaRenderer, Publisher, ScriptProvider, VisualProvider, VoiceProvider } from './types.js';
 
 export type AppServices = ReturnType<typeof createServices>;
 
 type BootstrapOptions = {
   env?: NodeJS.ProcessEnv;
+  commandRunner?: CommandRunner;
   mediaRenderer?: MediaRenderer;
-  publishers?: Publisher[];
+  publishers?: Publisher[]; 
   scriptProvider?: ScriptProvider;
   voiceProvider?: VoiceProvider;
   visualProvider?: VisualProvider;
@@ -68,15 +69,23 @@ export async function bootstrap(options?: BootstrapOptions) {
     repository,
     services.auditService
   );
+  const recoveredManualClipJobCount = await recoverInterruptedManualClipJobs(
+    services.manualClipsService,
+    repository,
+    services.auditService
+  );
   const recoveredSchedulerRunCount = await recoverInterruptedSchedulerRuns(
     repository,
     services.auditService
   );
 
-  if (recoveredJobCount + recoveredSchedulerRunCount > 0) {
+  if (recoveredJobCount + recoveredManualClipJobCount + recoveredSchedulerRunCount > 0) {
     const state = repository.getSchedulerState();
     const recoveredParts = [
       recoveredJobCount > 0 ? `${recoveredJobCount} interrupted job(s)` : null,
+      recoveredManualClipJobCount > 0
+        ? `${recoveredManualClipJobCount} interrupted manual clip job(s)`
+        : null,
       recoveredSchedulerRunCount > 0
         ? `${recoveredSchedulerRunCount} interrupted scheduler run(s)`
         : null,
@@ -121,6 +130,8 @@ function createServices(
     publishers,
     enabledPlatforms
   );
+  const commandRunner =
+    options?.commandRunner ?? createProcessRunner(env.FFMPEG_COMMAND_TIMEOUT_SECONDS * 1000);
   const workflowService = new WorkflowService(
     env,
     runtimePaths,
@@ -131,9 +142,15 @@ function createServices(
     options?.voiceProvider ?? createVoiceProvider(env),
     options?.visualProvider ?? createVisualProvider(env),
     options?.mediaRenderer ??
-      (env.NODE_ENV === 'test'
-        ? new StubRenderer()
-        : new FfmpegRenderer(createProcessRunner(env.FFMPEG_COMMAND_TIMEOUT_SECONDS * 1000)))
+      (env.NODE_ENV === 'test' ? new StubRenderer() : new FfmpegRenderer(commandRunner))
+  );
+  const manualClipsService = new ManualClipsService(
+    env,
+    runtimePaths,
+    repository,
+    auditService,
+    workflowService,
+    commandRunner
   );
   const schedulerService = new SchedulerService(
     env,
@@ -147,6 +164,7 @@ function createServices(
   return {
     auditService,
     artifactsService,
+    manualClipsService,
     profilesService,
     jobsService,
     reviewsService,
@@ -183,7 +201,11 @@ async function recoverInterruptedJobs(
 ): Promise<number> {
   const interruptedJobs = repository
     .listJobs()
-    .filter((job) => ['drafting', 'publish_pending'].includes(job.status));
+    .filter(
+      (job) =>
+        job.status === 'publish_pending' ||
+        (job.status === 'drafting' && job.manualClipBundle === null)
+    );
 
   if (interruptedJobs.length === 0) {
     return 0;
@@ -202,6 +224,31 @@ async function recoverInterruptedJobs(
       status: 'failed',
       errorMessage: message,
     });
+  }
+
+  return interruptedJobs.length;
+}
+
+async function recoverInterruptedManualClipJobs(
+  manualClipsService: ManualClipsService,
+  repository: AppRepository,
+  auditService: AuditService
+): Promise<number> {
+  const interruptedJobs = repository
+    .listJobs()
+    .filter(
+      (job) =>
+        job.manualClipBundle &&
+        (job.status === 'waiting_for_manual_clip' || job.status === 'drafting')
+    );
+
+  if (interruptedJobs.length === 0) {
+    return 0;
+  }
+
+  for (const job of interruptedJobs) {
+    auditService.info(job.id, 'Manual clip workflow recovered after restart.');
+    await manualClipsService.resumeIfReady(job.id, { allowDrafting: true });
   }
 
   return interruptedJobs.length;

@@ -7,7 +7,7 @@ import { apiClient } from '../api/client';
 import { JobProgressStepper } from '../components/JobProgressStepper';
 import { StatePanel } from '../components/StatePanel';
 import { StatusBadge } from '../components/StatusBadge';
-import { useToast } from '../components/Toast';
+import { type ToastInput, useToast } from '../components/Toast';
 import { formatPlatformLabel } from '../lib/platforms';
 
 export function RunDetailPage() {
@@ -164,7 +164,9 @@ export function RunDetailPage() {
         onRetryJob={handleRetry}
         onRetryPublication={handleRetryPublication}
         retrying={retrying}
+        onRefreshBackground={() => load({ background: true })}
         onRetry={() => void load()}
+        pushToast={pushToast}
       />
     </section>
   );
@@ -174,21 +176,28 @@ type RunDetailContentProps = {
   detail: JobDetailResponse | null;
   isLoading: boolean;
   loadFailed: boolean;
-  onRetryJob: () => Promise<void>;
-  onRetryPublication: () => Promise<void>;
-  retrying: boolean;
+  onRetryJob?: () => Promise<void>;
+  onRetryPublication?: () => Promise<void>;
+  retrying?: boolean;
+  onRefreshBackground?: () => Promise<void>;
   onRetry: () => void;
+  pushToast?: (toast: ToastInput) => void;
 };
 
 export function RunDetailContent({
   detail,
   isLoading,
   loadFailed,
-  onRetryJob,
-  onRetryPublication,
-  retrying,
+  onRetryJob = async () => {},
+  onRetryPublication = async () => {},
+  retrying = false,
+  onRefreshBackground = async () => {},
   onRetry,
+  pushToast = () => {},
 }: RunDetailContentProps) {
+  const [manualClipFiles, setManualClipFiles] = useState<Record<number, File | null>>({});
+  const [uploadingSceneOrder, setUploadingSceneOrder] = useState<number | null>(null);
+
   if (isLoading && !detail) {
     return (
       <StatePanel
@@ -236,10 +245,83 @@ export function RunDetailContent({
     publicationResults.length > 0 &&
     hasPublicationFailure &&
     detail.progress.retryable;
+  const manualClipBundle = detail.job.manualClipBundle;
+  const jobId = detail.job.id;
   const hasLocalPublication = publicationResults.some(
     (result) => result.platform === 'local' && result.status === 'published'
   );
   const renderThumbnailPath = detail.job.reviewPackage?.renderBundle.thumbnailPath ?? null;
+
+  async function handleManualClipUpload(sceneOrder: number) {
+    const selectedFile = manualClipFiles[sceneOrder];
+    if (!selectedFile) {
+      pushToast({
+        tone: 'warning',
+        title: 'Choose a clip first',
+        message: `Select the MP4 for scene ${sceneOrder} before uploading.`,
+      });
+      return;
+    }
+
+    try {
+      setUploadingSceneOrder(sceneOrder);
+      const updatedJob = await apiClient.uploadManualClip(jobId, sceneOrder, selectedFile);
+      const remainingPending = updatedJob.manualClipBundle?.requests.some(
+        (request) => request.status === 'pending'
+      );
+
+      pushToast(
+        updatedJob.status === 'failed'
+          ? {
+              tone: 'danger',
+              title: 'Manual clip rejected',
+              message: updatedJob.errorMessage ?? 'The uploaded clip did not pass validation.',
+            }
+          : updatedJob.status === 'review_pending'
+            ? {
+                tone: 'success',
+                title: 'Clip accepted',
+                message: 'The workflow resumed and the review package is being prepared.',
+              }
+            : remainingPending
+              ? {
+                  tone: 'warning',
+                  title: 'Clip uploaded',
+                  message: 'The job is still waiting for the remaining manual clip(s).',
+                }
+              : {
+                  tone: 'info',
+                  title: 'Clip uploaded',
+                  message: 'The job is resuming now.',
+                }
+      );
+
+      setManualClipFiles((current) => ({
+        ...current,
+        [sceneOrder]: null,
+      }));
+      await onRefreshBackground().catch((error) => {
+        pushToast({
+          tone: 'warning',
+          title: 'Run refresh delayed',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'The upload completed, but the page refresh is delayed.',
+        });
+      });
+      return updatedJob;
+    } catch (value) {
+      pushToast({
+        tone: 'danger',
+        title: 'Manual clip upload failed',
+        message: value instanceof Error ? value.message : 'Unable to upload the manual clip.',
+      });
+      return null;
+    } finally {
+      setUploadingSceneOrder(null);
+    }
+  }
 
   return (
     <div className="stack">
@@ -261,6 +343,128 @@ export function RunDetailContent({
           </div>
         </dl>
       </article>
+
+      {manualClipBundle ? (
+        <article className="card manual-clip-card">
+          <div className="row-between">
+            <div>
+              <p className="eyebrow">Manual clip intake</p>
+              <h3>Upload the premium Veo scene</h3>
+              <p className="card-intro muted">
+                Generate the clip in Flow, upload the MP4 here, and the run will continue
+                automatically. The final render mutes the clip by default.
+              </p>
+            </div>
+            <StatusBadge status={detail.job.status} />
+          </div>
+
+          <dl className="detail-list detail-list-compact">
+            <div>
+              <dt>Requested scenes</dt>
+              <dd>{manualClipBundle.requests.length}</dd>
+            </div>
+            <div>
+              <dt>Wait window</dt>
+              <dd>
+                {manualClipBundle.waitTimeoutSeconds >= 60
+                  ? `${Math.ceil(manualClipBundle.waitTimeoutSeconds / 60)}m`
+                  : `${manualClipBundle.waitTimeoutSeconds}s`}
+              </dd>
+            </div>
+          </dl>
+
+          <div className="stack">
+            {manualClipBundle.requests.map((request) => {
+              const selectedFile = manualClipFiles[request.sceneOrder] ?? null;
+              const isUploading = uploadingSceneOrder === request.sceneOrder;
+
+              return (
+                <section className="manual-clip-request" key={request.sceneOrder}>
+                  <div className="row-between manual-clip-request-header">
+                    <div>
+                      <p className="eyebrow">Scene {request.sceneOrder}</p>
+                      <h4>
+                        {request.targetClipDurationSeconds}s clip for {request.sceneText}
+                      </h4>
+                      <p className="muted">{request.audioDirective}</p>
+                    </div>
+                    <StatusBadge status={request.status} />
+                  </div>
+
+                  <pre className="manual-clip-prompt">{request.prompt}</pre>
+
+                  <div className="manual-clip-upload">
+                    <label className="manual-clip-file">
+                      <span className="field-note">Choose the MP4 for this scene</span>
+                      <input
+                        accept="video/mp4,video/*"
+                        onChange={(event) => {
+                          setManualClipFiles((current) => ({
+                            ...current,
+                            [request.sceneOrder]: event.target.files?.[0] ?? null,
+                          }));
+                        }}
+                        type="file"
+                      />
+                    </label>
+                    <div className="action-row">
+                      <button
+                        className="button button-secondary"
+                        onClick={async () => {
+                          try {
+                            if (!navigator.clipboard?.writeText) {
+                              pushToast({
+                                tone: 'warning',
+                                title: 'Clipboard unavailable',
+                                message: 'Copy the prompt manually if your browser blocks clipboard access.',
+                              });
+                              return;
+                            }
+
+                            await navigator.clipboard.writeText(request.prompt);
+                            pushToast({
+                              tone: 'success',
+                              title: 'Prompt copied',
+                              message: `Scene ${request.sceneOrder} prompt copied to the clipboard.`,
+                            });
+                          } catch (error) {
+                            pushToast({
+                              tone: 'danger',
+                              title: 'Copy failed',
+                              message:
+                                error instanceof Error
+                                  ? error.message
+                                  : 'Unable to copy the prompt to the clipboard.',
+                            });
+                          }
+                        }}
+                        type="button"
+                      >
+                        Copy prompt
+                      </button>
+                      <button
+                        className="button button-primary"
+                        disabled={request.status !== 'pending' || !selectedFile || isUploading}
+                        onClick={() => void handleManualClipUpload(request.sceneOrder)}
+                        type="button"
+                      >
+                        {isUploading ? 'Uploading...' : 'Upload clip'}
+                      </button>
+                    </div>
+                    <p className="field-note">
+                      {selectedFile
+                        ? `Selected file: ${selectedFile.name}`
+                        : request.status === 'uploaded'
+                          ? 'Clip already uploaded for this scene.'
+                          : 'The app waits here until the clip is uploaded or the wait window expires.'}
+                    </p>
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </article>
+      ) : null}
 
       {detail.progress.stage === 'failed' ? (
         <article className="card">
@@ -672,7 +876,7 @@ function formatDurationSeconds(value: number | null, fallback = 'Not recorded') 
 }
 
 function shouldPollJob(detail: JobDetailResponse['job']) {
-  if (detail.status === 'drafting') {
+  if (detail.status === 'drafting' || detail.status === 'waiting_for_manual_clip') {
     return true;
   }
 

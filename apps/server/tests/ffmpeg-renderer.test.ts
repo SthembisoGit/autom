@@ -25,6 +25,7 @@ function createRuntimePaths(root: string): RuntimePaths {
     outputDirectory: join(root, 'var', 'output'),
     publishedDirectory: join(root, 'var', 'published'),
     logDirectory: join(root, 'var', 'log'),
+    manualClipDirectory: join(root, 'var', 'manual-clips'),
   };
 }
 
@@ -63,6 +64,7 @@ function createJob(): GenerationJob {
     status: 'drafting',
     scriptPackage: null,
     scriptMetadata: null,
+    manualClipBundle: null,
     reviewPackage: null,
     publicationResults: [],
     errorMessage: null,

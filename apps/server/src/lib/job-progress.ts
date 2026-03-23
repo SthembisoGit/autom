@@ -243,6 +243,18 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
     });
   }
 
+  if (job.status === 'waiting_for_manual_clip') {
+    return JobProgressSchema.parse({
+      stage: 'waiting_for_manual_clip',
+      title: 'Waiting for manual clip upload',
+      detail: buildManualClipProgressDetail(job),
+      tone: 'warning',
+      isTerminal: false,
+      retryable: false,
+      updatedAt: job.manualClipBundle?.updatedAt ?? job.updatedAt,
+    });
+  }
+
   if (latestMarker) {
     return JobProgressSchema.parse({
       stage: latestMarker.marker.stage,
@@ -289,6 +301,34 @@ function findLatestStageMarker(
   }
 
   return null;
+}
+
+function buildManualClipProgressDetail(job: GenerationJob): string {
+  const bundle = job.manualClipBundle;
+  if (!bundle || bundle.requests.length === 0) {
+    return 'The workflow is waiting for a manual premium clip before it continues.';
+  }
+
+  const pendingRequests = bundle.requests.filter((request) => request.status === 'pending').length;
+  const uploadedRequests = bundle.requests.filter((request) => request.status === 'uploaded').length;
+  const expiredRequests = bundle.requests.filter((request) => request.status === 'expired').length;
+  const remainingMinutes = Math.max(1, Math.ceil(bundle.waitTimeoutSeconds / 60));
+
+  if (pendingRequests > 0) {
+    return `Waiting for ${pendingRequests} manual clip${pendingRequests === 1 ? '' : 's'} to be uploaded. ${uploadedRequests} clip${
+      uploadedRequests === 1 ? '' : 's'
+    } already attached. The workflow will fall back to Pexels after ${remainingMinutes} minute${
+      remainingMinutes === 1 ? '' : 's'
+    }.`;
+  }
+
+  if (expiredRequests > 0) {
+    return `All requested clips were not uploaded in time, so the workflow is falling back to Pexels for ${expiredRequests} scene${
+      expiredRequests === 1 ? '' : 's'
+    }.`;
+  }
+
+  return 'The manual clip has been uploaded and the workflow is resuming now.';
 }
 
 function formatPublicationResultSummary(result: PublicationResult): string {

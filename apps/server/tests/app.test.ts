@@ -10,8 +10,8 @@ import type { PlatformConnection, PublicationResult } from '@autom/contracts';
 import { createApp } from '../src/app.js';
 import { writeArtifactFile } from '../src/lib/artifacts.js';
 import { bootstrap } from '../src/lib/bootstrap.js';
-import type { Publisher } from '../src/lib/types.js';
-import { StubRenderer } from '../src/media/ffmpeg-renderer.js';
+import type { Publisher, ScriptProvider, VisualProvider, VoiceProvider } from '../src/lib/types.js';
+import { StubRenderer, type CommandRunner } from '../src/media/ffmpeg-renderer.js';
 
 function buildTestEnv(
   workspaceRoot: string,
@@ -97,6 +97,10 @@ test('production env accepts public origins and restricts CORS to the ops host',
 async function createTestContext(options?: {
   publishers?: Publisher[];
   env?: Record<string, string>;
+  commandRunner?: CommandRunner;
+  scriptProvider?: ScriptProvider;
+  voiceProvider?: VoiceProvider;
+  visualProvider?: VisualProvider;
 }) {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-test-'));
   const env = buildTestEnv(workspaceRoot, options?.env);
@@ -104,6 +108,10 @@ async function createTestContext(options?: {
     env,
     mediaRenderer: new StubRenderer(),
     publishers: options?.publishers,
+    commandRunner: options?.commandRunner,
+    scriptProvider: options?.scriptProvider,
+    voiceProvider: options?.voiceProvider,
+    visualProvider: options?.visualProvider,
   });
 
   return {
@@ -389,6 +397,133 @@ test('server workflow creates, reviews, and publishes a job', async () => {
     });
     assert.equal(localManifestResponse.statusCode, 200);
     assert.equal(localManifestResponse.json().jobId, createdJob.id);
+  } finally {
+    await app.close();
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('server pauses for a manual clip and resumes after upload', async () => {
+  const commandRunner: CommandRunner = async () => ({
+    stdout: JSON.stringify({
+      streams: [
+        {
+          width: 1080,
+          height: 1920,
+          codec_name: 'h264',
+        },
+      ],
+      format: {
+        duration: '8.0',
+      },
+    }),
+    stderr: '',
+  });
+
+  const scriptProvider: ScriptProvider = {
+    async generate() {
+      return {
+        scriptPackage: {
+          id: 'script_manual_clip',
+          title: 'Manual Clip Script',
+          description: 'Testing manual clip intake.',
+          tags: ['crm', 'demo'],
+          scenes: [
+            {
+              order: 1,
+              text: 'Show the CRM dashboard while a founder clicks through a clean product demo.',
+              visualQuery: 'CRM dashboard product demo',
+              durationSeconds: 12,
+            },
+          ],
+          totalDurationSeconds: 12,
+        },
+        scriptMetadata: {
+          provider: 'local',
+          model: null,
+          promptVersion: 'manual-clip-test-v1',
+          mode: 'stub',
+          attemptCount: 1,
+          repaired: false,
+        },
+      };
+    },
+  };
+
+  const voiceProvider: VoiceProvider = {
+    async synthesize() {
+      return {
+        narrationPath: null,
+        assetReferences: [],
+        warnings: [],
+        sceneNarrationTimeline: null,
+      };
+    },
+  };
+
+  const { app, workspaceRoot } = await createTestContext({
+    commandRunner,
+    scriptProvider,
+    voiceProvider,
+  });
+
+  try {
+    const profilesResponse = await app.inject({
+      method: 'GET',
+      url: '/profiles',
+    });
+    const profiles = profilesResponse.json() as Array<{ id: string }>;
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/jobs/generate',
+      payload: {
+        profileId: profiles[0]?.id,
+        topic: 'Best CRM for 2026',
+      },
+    });
+    assert.equal(createResponse.statusCode, 200);
+    assert.equal(createResponse.json().status, 'waiting_for_manual_clip');
+
+    const manualClipBundle = createResponse.json().manualClipBundle as {
+      requests: Array<{
+        sceneOrder: number;
+        prompt: string;
+        audioDirective: string;
+        status: string;
+      }>;
+    };
+    assert.equal(manualClipBundle.requests.length, 1);
+    assert.match(manualClipBundle.requests[0]?.prompt ?? '', /Manual Veo clip brief/i);
+    assert.match(manualClipBundle.requests[0]?.audioDirective ?? '', /no spoken dialogue/i);
+
+    const uploadResponse = await app.inject({
+      method: 'POST',
+      url: `/jobs/${createResponse.json().id}/manual-clips/${manualClipBundle.requests[0]?.sceneOrder}`,
+      headers: {
+        'content-type': 'video/mp4',
+        'x-file-name': 'manual-clip.mp4',
+      },
+      payload: Buffer.from('fake-mp4-data'),
+    });
+    assert.equal(uploadResponse.statusCode, 200);
+    assert.equal(uploadResponse.json().status, 'review_pending');
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/jobs/${createResponse.json().id}`,
+    });
+    assert.equal(detailResponse.statusCode, 200);
+    assert.equal(detailResponse.json().job.status, 'review_pending');
+    assert.equal(detailResponse.json().progress.stage, 'ready_for_review');
+    assert.equal(
+      detailResponse
+        .json()
+        .job.reviewPackage.assetBundle.assetReferences.some(
+          (reference: { provider: string }) => reference.provider === 'veo'
+        ),
+      true
+    );
   } finally {
     await app.close();
     await rm(workspaceRoot, { recursive: true, force: true });

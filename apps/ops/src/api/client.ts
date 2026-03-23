@@ -71,6 +71,23 @@ export const apiClient = {
       body: JSON.stringify({}),
     });
   },
+  async uploadManualClip(jobId: string, sceneOrder: number, file: File): Promise<GenerationJob> {
+    const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/manual-clips/${sceneOrder}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'x-file-name': file.name,
+      },
+      body: file,
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { message?: unknown };
+      throw new Error(typeof payload.message === 'string' ? payload.message : 'Request failed.');
+    }
+
+    return (await response.json()) as GenerationJob;
+  },
   getJobMonitor(): Promise<JobMonitorResponse> {
     return request('/jobs/monitor');
   },

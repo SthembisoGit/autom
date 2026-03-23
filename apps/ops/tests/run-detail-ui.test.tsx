@@ -91,6 +91,7 @@ function createRunDetail(): JobDetailResponse {
           renderedDurationSeconds: 32,
           narrationDurationSeconds: 32,
           subtitleCueCount: 8,
+          subtitleTimingSource: 'voice_timeline',
         },
         assetBundle: {
           selectedVisualQueries: ['planning board'],
@@ -120,6 +121,7 @@ function createRunDetail(): JobDetailResponse {
           ],
         },
       },
+      manualClipBundle: null,
       publicationResults: [
         {
           platform: 'local',

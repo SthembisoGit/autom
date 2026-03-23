@@ -27,7 +27,9 @@ function createRuntimePaths(root: string): RuntimePaths {
     dbDirectory: join(root, 'var', 'db'),
     tempDirectory: join(root, 'var', 'temp'),
     outputDirectory: join(root, 'var', 'output'),
+    publishedDirectory: join(root, 'var', 'published'),
     logDirectory: join(root, 'var', 'log'),
+    manualClipDirectory: join(root, 'var', 'manual-clips'),
   };
 }
 
