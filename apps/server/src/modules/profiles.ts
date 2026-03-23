@@ -1,0 +1,156 @@
+import { CronExpressionParser } from 'cron-parser';
+import { nanoid } from 'nanoid';
+
+import type { ContentProfile, Platform, UpsertProfileRequest } from '@autom/contracts';
+import { ContentProfileSchema } from '@autom/contracts';
+
+import { normalizeCronExpression } from '../lib/cron.js';
+import { createDefaultProfile } from '../lib/default-profile.js';
+import { badRequest } from '../lib/errors.js';
+import { nowIso } from '../lib/time.js';
+import type { AppRepository } from '../repositories/app-repository.js';
+
+export class ProfilesService {
+  constructor(
+    private readonly repository: AppRepository,
+    private readonly availablePlatforms: Platform[]
+  ) {}
+
+  ensureSeedProfile(): ContentProfile {
+    const existing = this.repository.listProfiles();
+    if (existing.length > 0) {
+      return this.sanitizeProfile(existing[0]);
+    }
+
+    return this.repository.upsertProfile(createDefaultProfile(this.listAvailablePlatforms()));
+  }
+
+  listAvailablePlatforms(): Platform[] {
+    return [...this.availablePlatforms];
+  }
+
+  list(): ContentProfile[] {
+    return this.repository.listProfiles().map((profile) => this.sanitizeProfile(profile));
+  }
+
+  get(profileId: string): ContentProfile | null {
+    const profile = this.repository.getProfile(profileId);
+    return profile ? this.sanitizeProfile(profile) : null;
+  }
+
+  migrateAllProfilesToTargetPlatforms(targetPlatforms: Platform[]): number {
+    const nextTargets = this.sanitizeTargetPlatforms(targetPlatforms);
+    let migratedProfiles = 0;
+
+    for (const profile of this.repository.listProfiles()) {
+      const currentTargets = this.sanitizeTargetPlatforms(profile.targetPlatforms);
+      if (samePlatforms(currentTargets, nextTargets)) {
+        continue;
+      }
+
+      this.repository.upsertProfile(
+        ContentProfileSchema.parse({
+          ...profile,
+          targetPlatforms: [...nextTargets],
+          updatedAt: nowIso(),
+        })
+      );
+      migratedProfiles += 1;
+    }
+
+    return migratedProfiles;
+  }
+
+  topicViolatesPolicy(profile: ContentProfile, topic: string): string | null {
+    const normalizedTopic = topic.toLowerCase();
+
+    const blockedTopic = profile.bannedTopics.find((candidate) =>
+      normalizedTopic.includes(candidate.toLowerCase())
+    );
+    if (blockedTopic) {
+      return `Topic matches banned topic rule "${blockedTopic}".`;
+    }
+
+    const blockedTerm = profile.bannedTerms.find((candidate) =>
+      normalizedTopic.includes(candidate.toLowerCase())
+    );
+    if (blockedTerm) {
+      return `Topic matches banned term "${blockedTerm}".`;
+    }
+
+    return null;
+  }
+
+  upsert(profileId: string, input: UpsertProfileRequest): ContentProfile {
+    const current = this.repository.getProfile(profileId);
+    const timestamp = nowIso();
+    this.assertAvailableTargetPlatforms(input.targetPlatforms);
+
+    try {
+      CronExpressionParser.parse(normalizeCronExpression(input.scheduleCron), {
+        strict: true,
+      });
+    } catch (error) {
+      throw badRequest(
+        error instanceof Error
+          ? `Invalid cron expression. ${error.message}`
+          : 'Invalid cron expression.'
+      );
+    }
+
+    const profile = this.sanitizeProfile(
+      ContentProfileSchema.parse({
+        id: current?.id ?? profileId ?? `profile_${nanoid(8)}`,
+        createdAt: current?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+        ...input,
+      })
+    );
+
+    const savedProfile = this.repository.upsertProfile(profile);
+    if (savedProfile.enabled && (!current || !current.enabled)) {
+      this.repository.upsertSchedulerProfileResumeAt(savedProfile.id, savedProfile.updatedAt);
+    }
+
+    return savedProfile;
+  }
+
+  private sanitizeProfile(profile: ContentProfile): ContentProfile {
+    return {
+      ...profile,
+      targetPlatforms: this.sanitizeTargetPlatforms(profile.targetPlatforms),
+    };
+  }
+
+  private sanitizeTargetPlatforms(targetPlatforms: Platform[]): Platform[] {
+    const filtered = Array.from(
+      new Set(targetPlatforms.filter((platform) => this.availablePlatforms.includes(platform)))
+    );
+    const fallbackPlatform = this.availablePlatforms[0];
+    if (!fallbackPlatform) {
+      throw new Error('At least one profile target platform must be enabled.');
+    }
+
+    return filtered.length > 0 ? filtered : [fallbackPlatform];
+  }
+
+  private assertAvailableTargetPlatforms(targetPlatforms: Platform[]): void {
+    const unavailablePlatforms = targetPlatforms.filter(
+      (platform) => !this.availablePlatforms.includes(platform)
+    );
+
+    if (unavailablePlatforms.length === 0) {
+      return;
+    }
+
+    throw badRequest(
+      `Target platform${unavailablePlatforms.length === 1 ? '' : 's'} ${unavailablePlatforms.join(', ')} ${
+        unavailablePlatforms.length === 1 ? 'is' : 'are'
+      } not enabled for this deployment.`
+    );
+  }
+}
+
+function samePlatforms(left: Platform[], right: Platform[]): boolean {
+  return left.length === right.length && left.every((platform, index) => platform === right[index]);
+}

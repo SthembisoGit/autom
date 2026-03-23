@@ -1,0 +1,16 @@
+[Unit]
+Description=autoM Fastify Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/autom
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm --workspace @autom/server run start
+Restart=always
+RestartSec=5
+User=ubuntu
+Group=ubuntu
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,39 @@
+{
+  "name": "@autom/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "generate:job": "node dist/cli/generate-job.js",
+    "generate:job:dev": "tsx src/cli/generate-job.ts",
+    "scheduler:tick": "node dist/cli/run-scheduler-tick.js",
+    "scheduler:tick:dev": "tsx src/cli/run-scheduler-tick.ts",
+    "seed": "node dist/cli/seed-local-data.js",
+    "seed:dev": "tsx src/cli/seed-local-data.ts",
+    "reset": "node dist/cli/reset-local-data.js",
+    "reset:dev": "tsx src/cli/reset-local-data.ts",
+    "lint": "biome check src tests",
+    "test": "tsx --test tests/app.test.ts tests/scheduler.test.ts tests/gemini-provider.test.ts tests/media-providers.test.ts tests/ffmpeg-renderer.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@autom/config": "file:../../packages/config",
+    "@autom/contracts": "file:../../packages/contracts",
+    "@fastify/cors": "^10.0.1",
+    "@google/genai": "^1.0.0",
+    "better-sqlite3": "^11.7.0",
+    "cron-parser": "^5.5.0",
+    "fastify": "^5.2.1",
+    "googleapis": "^171.4.0",
+    "nanoid": "^5.1.0",
+    "retry": "^0.13.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "tsx": "^4.19.2"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@autom/ops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "lint": "biome check src tests vite.config.ts",
+    "test": "tsx --test tests/app.test.tsx tests/api-client.test.ts tests/reviews-ui.test.tsx tests/run-detail-ui.test.tsx tests/schedule-editor.test.tsx",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@autom/contracts": "file:../../packages/contracts",
+    "cron-parser": "^5.5.0",
+    "@rollup/rollup-win32-x64-msvc": "^4.59.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^6.30.1",
+    "rollup": "^4.59.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.3",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.19.2",
+    "vite": "^6.0.7"
+  }
+}

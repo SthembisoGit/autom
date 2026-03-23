@@ -1,0 +1,43 @@
+{
+  "name": "autom",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@10.8.2",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build:packages": "npm --workspace @autom/contracts run build && npm --workspace @autom/config run build",
+    "build:apps": "npm --workspace @autom/server run build && npm --workspace @autom/ops run build",
+    "build": "npm run build:packages && npm run build:apps",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "check": "npm run build:packages && npm run typecheck && npm run lint && npm run test",
+    "dev:server": "npm run build:packages && npm --workspace @autom/server run dev",
+    "dev:ops": "npm run build:packages && npm --workspace @autom/ops run dev",
+    "scheduler:tick": "npm run build:packages && npm --workspace @autom/server run scheduler:tick",
+    "scheduler:tick:dev": "npm run build:packages && npm --workspace @autom/server run scheduler:tick:dev",
+    "seed:dev": "npm run build:packages && npm --workspace @autom/server run seed:dev",
+    "reset:dev": "npm run build:packages && npm --workspace @autom/server run reset:dev",
+    "windows:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/start-autoM.ps1",
+    "windows:install-startup-task": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/install-startup-task.ps1",
+    "windows:remove-startup-task": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/uninstall-startup-task.ps1"
+  },
+  "devDependencies": {
+    "@babel/helper-validator-identifier": "^7.28.5",
+    "@biomejs/biome": "^1.9.4",
+    "@rollup/rollup-win32-x64-msvc": "^4.59.0",
+    "@types/node": "^22.10.2",
+    "ajv": "^8.18.0",
+    "fdir": "^6.5.0",
+    "get-tsconfig": "^4.13.6",
+    "magic-string": "^0.30.21",
+    "picomatch": "^4.0.3",
+    "typescript": "^5.7.3"
+  }
+}

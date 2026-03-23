@@ -1,0 +1,19 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+
+# Environment variables - NEVER commit
+.env
+.env.local
+.env.*.local
+.env.example.local
+
+# Logs
+*.log
+logs/
+
+# Runtime directories
+var/
+apps/ops/.vite/
+apps/ops/vite.config.d.ts
