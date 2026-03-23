@@ -27,6 +27,7 @@ export class SqliteDatabase {
         status TEXT NOT NULL,
         script_json TEXT,
         script_metadata_json TEXT,
+        manual_clip_json TEXT,
         review_json TEXT,
         publication_json TEXT NOT NULL DEFAULT '[]',
         error_message TEXT,
@@ -81,6 +82,7 @@ export class SqliteDatabase {
     `);
 
     this.ensureColumn('jobs', 'script_metadata_json', 'TEXT');
+    this.ensureColumn('jobs', 'manual_clip_json', 'TEXT');
   }
 
   close(): void {

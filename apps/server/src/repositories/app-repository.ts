@@ -15,6 +15,7 @@ import {
   AuditEventSchema,
   ContentProfileSchema,
   DashboardSummarySchema,
+  ManualClipBundleSchema,
   GenerationJobSchema,
   ReviewPackageSchema,
   SchedulerRunSchema,
@@ -32,6 +33,7 @@ type JobRecord = {
   status: JobStatus;
   script_json: string | null;
   script_metadata_json: string | null;
+  manual_clip_json: string | null;
   review_json: string | null;
   publication_json: string;
   error_message: string | null;
@@ -133,6 +135,7 @@ export class AppRepository {
       status: 'drafting',
       scriptPackage: null,
       scriptMetadata: null,
+      manualClipBundle: null,
       reviewPackage: null,
       publicationResults: [],
       errorMessage: null,
@@ -151,7 +154,13 @@ export class AppRepository {
           SELECT * FROM jobs
           WHERE profile_id = ?
             AND lower(trim(topic)) = lower(trim(?))
-            AND status IN ('drafting', 'review_pending', 'approved', 'publish_pending')
+            AND status IN (
+              'drafting',
+              'waiting_for_manual_clip',
+              'review_pending',
+              'approved',
+              'publish_pending'
+            )
           ORDER BY created_at DESC
           LIMIT 1
         `
@@ -273,7 +282,9 @@ export class AppRepository {
     return DashboardSummarySchema.parse({
       totalProfiles: profiles.length,
       enabledProfiles: profiles.filter((profile) => profile.enabled).length,
-      draftJobs: jobs.filter((job) => job.status === 'drafting').length,
+      draftJobs: jobs.filter(
+        (job) => job.status === 'drafting' || job.status === 'waiting_for_manual_clip'
+      ).length,
       reviewPendingJobs: jobs.filter((job) => job.status === 'review_pending').length,
       publishedJobs: jobs.filter((job) => job.status === 'published').length,
     });
@@ -610,6 +621,7 @@ export class AppRepository {
           status,
           script_json,
           script_metadata_json,
+          manual_clip_json,
           review_json,
           publication_json,
           error_message,
@@ -623,6 +635,7 @@ export class AppRepository {
           @status,
           @script_json,
           @script_metadata_json,
+          @manual_clip_json,
           @review_json,
           @publication_json,
           @error_message,
@@ -635,6 +648,7 @@ export class AppRepository {
           status = excluded.status,
           script_json = excluded.script_json,
           script_metadata_json = excluded.script_metadata_json,
+          manual_clip_json = excluded.manual_clip_json,
           review_json = excluded.review_json,
           publication_json = excluded.publication_json,
           error_message = excluded.error_message,
@@ -647,6 +661,7 @@ export class AppRepository {
         status: job.status,
         script_json: job.scriptPackage ? JSON.stringify(job.scriptPackage) : null,
         script_metadata_json: job.scriptMetadata ? JSON.stringify(job.scriptMetadata) : null,
+        manual_clip_json: job.manualClipBundle ? JSON.stringify(job.manualClipBundle) : null,
         review_json: job.reviewPackage ? JSON.stringify(job.reviewPackage) : null,
         publication_json: JSON.stringify(job.publicationResults),
         error_message: job.errorMessage,
@@ -754,6 +769,9 @@ export class AppRepository {
     const scriptMetadata = row.script_metadata_json
       ? ScriptGenerationMetadataSchema.parse(JSON.parse(row.script_metadata_json))
       : null;
+    const manualClipBundle = row.manual_clip_json
+      ? ManualClipBundleSchema.parse(JSON.parse(row.manual_clip_json))
+      : null;
     const reviewPackage = row.review_json
       ? ReviewPackageSchema.parse(JSON.parse(row.review_json))
       : null;
@@ -765,6 +783,7 @@ export class AppRepository {
       status: row.status,
       scriptPackage,
       scriptMetadata,
+      manualClipBundle,
       reviewPackage,
       publicationResults: JSON.parse(row.publication_json) as PublicationResult[],
       errorMessage: row.error_message,

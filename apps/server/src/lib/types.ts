@@ -46,6 +46,7 @@ export interface VisualProvider {
     profile: ContentProfile;
     jobId: string;
     runtimePaths: RuntimePaths;
+    excludeSceneOrders?: number[];
   }): Promise<{
     selectedVisualQueries: string[];
     assetReferences: AssetReference[];

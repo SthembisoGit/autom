@@ -11,6 +11,7 @@ const uniqueStringListSchema = z
 
 export const JobStatusSchema = z.enum([
   'drafting',
+  'waiting_for_manual_clip',
   'review_pending',
   'approved',
   'publish_pending',
@@ -57,7 +58,7 @@ export const AssetReferenceSchema = z.object({
   kind: z.enum(['video', 'audio', 'subtitle', 'metadata']),
   path: z.string().min(1),
   label: z.string().min(1),
-  provider: z.enum(['local', 'deepgram', 'pexels', 'system']),
+  provider: z.enum(['local', 'deepgram', 'pexels', 'veo', 'system']),
   sourceUrl: z.string().url().nullable(),
   mimeType: z.string().nullable(),
   externalId: z.string().nullable(),
@@ -65,6 +66,38 @@ export const AssetReferenceSchema = z.object({
   query: z.string().nullable(),
 });
 export type AssetReference = z.infer<typeof AssetReferenceSchema>;
+
+export const ManualClipStatusSchema = z.enum(['pending', 'uploaded', 'expired']);
+export type ManualClipStatus = z.infer<typeof ManualClipStatusSchema>;
+
+export const ManualClipRequestSchema = z.object({
+  sceneOrder: z.number().int().positive(),
+  sceneText: z.string().min(1),
+  visualQuery: z.string().min(1),
+  sceneDurationSeconds: z.number().positive(),
+  targetClipDurationSeconds: z.number().positive(),
+  prompt: z.string().min(1),
+  audioDirective: z.string().min(1),
+  status: ManualClipStatusSchema,
+  requestedAt: z.string().min(1),
+  expiresAt: z.string().min(1),
+  uploadedAt: z.string().nullable(),
+  validatedAt: z.string().nullable(),
+  measuredDurationSeconds: z.number().positive().nullable(),
+  assetPath: z.string().nullable(),
+  contentType: z.string().nullable(),
+  originalFileName: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+});
+export type ManualClipRequest = z.infer<typeof ManualClipRequestSchema>;
+
+export const ManualClipBundleSchema = z.object({
+  waitTimeoutSeconds: z.number().int().positive(),
+  requests: z.array(ManualClipRequestSchema).default([]),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+export type ManualClipBundle = z.infer<typeof ManualClipBundleSchema>;
 
 export const AssetBundleSchema = z.object({
   selectedVisualQueries: z.array(z.string().min(1)),
@@ -237,6 +270,7 @@ export const GenerationJobSchema = z.object({
   status: JobStatusSchema,
   scriptPackage: ScriptPackageSchema.nullable(),
   scriptMetadata: ScriptGenerationMetadataSchema.nullable(),
+  manualClipBundle: ManualClipBundleSchema.nullable(),
   reviewPackage: ReviewPackageSchema.nullable(),
   publicationResults: z.array(PublicationResultSchema).default([]),
   errorMessage: z.string().nullable(),
@@ -257,6 +291,7 @@ export type AuditEvent = z.infer<typeof AuditEventSchema>;
 export const JobProgressStageSchema = z.enum([
   'starting',
   'generating_script',
+  'waiting_for_manual_clip',
   'generating_narration',
   'selecting_visuals',
   'rendering_review',
