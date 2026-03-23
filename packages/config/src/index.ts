@@ -30,6 +30,7 @@ export const AppEnvSchema = z.object({
   SESSION_SECRET: z.string().min(8).default('replace-me-in-development'),
   DATABASE_URL: z.string().min(1).default('var/db/autom.sqlite'),
   MEDIA_ROOT: z.string().min(1).default('var'),
+  MANUAL_CLIP_WAIT_SECONDS: z.coerce.number().int().min(60).default(900),
   FFMPEG_PATH: z.string().min(1).default('ffmpeg'),
   FFPROBE_PATH: z.string().min(1).default('ffprobe'),
   FFMPEG_COMMAND_TIMEOUT_SECONDS: z.coerce.number().int().min(30).default(600),
@@ -62,6 +63,7 @@ export type RuntimePaths = {
   outputDirectory: string;
   publishedDirectory: string;
   logDirectory: string;
+  manualClipDirectory: string;
 };
 
 export const RUNTIME_DIRECTORIES = [
@@ -70,6 +72,7 @@ export const RUNTIME_DIRECTORIES = [
   'var/output',
   'var/published',
   'var/log',
+  'var/manual-clips',
 ] as const;
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
@@ -101,6 +104,7 @@ export function resolveRuntimePaths(mediaRoot: string): RuntimePaths {
     outputDirectory: join(mediaRoot, 'output'),
     publishedDirectory: join(mediaRoot, 'published'),
     logDirectory: join(mediaRoot, 'log'),
+    manualClipDirectory: join(mediaRoot, 'manual-clips'),
   };
 }
 
