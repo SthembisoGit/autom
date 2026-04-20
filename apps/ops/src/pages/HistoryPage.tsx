@@ -80,9 +80,9 @@ export function HistoryPage() {
               : job.status;
 
             return (
-              <article className="card" key={job.id}>
+              <article className="card history-card" key={job.id}>
                 <div className="row-between">
-                  <div className="stack stack-tight">
+                  <div className="stack stack-tight history-main">
                     <div>
                       <Link className="job-link" to={`/runs/${job.id}`}>
                         {job.topic}
@@ -96,18 +96,20 @@ export function HistoryPage() {
                         <p className="muted">Local Archive validation is complete for this run.</p>
                       ) : null}
                     </div>
-                    {job.publicationResults.map((result) => (
-                      <div
-                        className="row-between publication-row"
-                        key={`${job.id}-${result.platform}`}
-                      >
-                        <div>
-                          <p>{formatPlatformLabel(result.platform)}</p>
-                          <p className="muted">{describePublicationResult(result)}</p>
+                    <div className="stack stack-tight">
+                      {job.publicationResults.map((result) => (
+                        <div
+                          className="row-between publication-row publication-row-compact"
+                          key={`${job.id}-${result.platform}`}
+                        >
+                          <div>
+                            <p>{formatPlatformLabel(result.platform)}</p>
+                            <p className="muted">{describePublicationResult(result)}</p>
+                          </div>
+                          <StatusBadge status={result.status} />
                         </div>
-                        <StatusBadge status={result.status} />
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                     <div className="action-bar">
                       <Link className="button button-primary" to={`/runs/${job.id}`}>
                         Open run detail

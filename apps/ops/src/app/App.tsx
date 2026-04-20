@@ -8,6 +8,7 @@ import { HistoryPage } from '../pages/HistoryPage';
 import { ProfilesPage } from '../pages/ProfilesPage';
 import { ReviewsPage } from '../pages/ReviewsPage';
 import { RunDetailPage } from '../pages/RunDetailPage';
+import { RunsPage } from '../pages/RunsPage';
 
 export function App() {
   return (
@@ -16,6 +17,7 @@ export function App() {
         <Routes>
           <Route element={<Layout />} path="/">
             <Route element={<DashboardPage />} index />
+            <Route element={<RunsPage />} path="runs" />
             <Route element={<ConnectionsPage />} path="connections" />
             <Route element={<ReviewsPage />} path="reviews" />
             <Route element={<ProfilesPage />} path="profiles" />

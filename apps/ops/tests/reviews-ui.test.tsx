@@ -45,7 +45,8 @@ test('ReviewsContent surfaces warnings and job stats for pending review work', (
     </MemoryRouter>
   );
 
-  assert.match(markup, /2 scenes, 2 assets/i);
+  assert.match(markup, /2 scenes/i);
+  assert.match(markup, /2 assets/i);
   assert.match(markup, /Review warnings: 1 warning before approval/i);
   assert.match(markup, /Review warnings/i);
   assert.match(markup, /Approving\.\.\./i);

@@ -205,7 +205,7 @@ export function ReviewsContent({
         const isAnotherJobBusy = busyState !== null && busyState.jobId !== job.id;
 
         return (
-          <article className="card" key={job.id}>
+          <article className="card review-card" key={job.id}>
             <div className="row-between">
               <div className="stack stack-tight">
                 <div>
@@ -214,10 +214,13 @@ export function ReviewsContent({
                   </Link>
                   <p className="muted">{job.scriptPackage?.title ?? 'Script pending'}</p>
                 </div>
-                <p className="muted">
-                  {formatCount(job.scriptPackage?.scenes.length ?? 0, 'scene')},{' '}
-                  {formatCount(assetCount, 'asset')}
-                </p>
+                <div className="review-meta-row">
+                  <span className="profile-summary-chip">
+                    {formatCount(job.scriptPackage?.scenes.length ?? 0, 'scene')}
+                  </span>
+                  <span className="profile-summary-chip">{formatCount(assetCount, 'asset')}</span>
+                  <span className="profile-summary-chip">{job.status.replace(/_/g, ' ')}</span>
+                </div>
               </div>
               <StatusBadge status={job.status} />
             </div>
