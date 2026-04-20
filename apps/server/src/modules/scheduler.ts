@@ -7,6 +7,7 @@ import { SchedulerOverviewSchema } from '@autom/contracts';
 import { normalizeCronExpression } from '../lib/cron.js';
 import { AppError } from '../lib/errors.js';
 import { isRetryableFailureMessage } from '../lib/failure.js';
+import type { NewsProvider } from '../lib/types.js';
 import type { AppRepository } from '../repositories/app-repository.js';
 import type { AuditService } from './audit.js';
 import type { ProfilesService } from './profiles.js';
@@ -25,7 +26,8 @@ export class SchedulerService {
     private readonly repository: AppRepository,
     private readonly profilesService: ProfilesService,
     private readonly workflowService: WorkflowService,
-    private readonly auditService: AuditService
+    private readonly auditService: AuditService,
+    private readonly newsProvider: NewsProvider
   ) {}
 
   start(): void {
@@ -104,7 +106,7 @@ export class SchedulerService {
     let failedCount = 0;
 
     try {
-      queuedCount = this.queueDueRuns(at, state.lastTickCompletedAt);
+      queuedCount = await this.queueDueRuns(at, state.lastTickCompletedAt);
       const dueRuns = this.repository.listDueSchedulerRuns(at.toISOString(), MAX_RUNS_PER_TICK);
 
       for (const run of dueRuns) {
@@ -135,7 +137,7 @@ export class SchedulerService {
     return this.getOverview();
   }
 
-  private queueDueRuns(now: Date, lastTickCompletedAt: string | null): number {
+  private async queueDueRuns(now: Date, lastTickCompletedAt: string | null): Promise<number> {
     const profiles = this.profilesService.list().filter((profile) => profile.enabled);
     let created = 0;
 
@@ -162,10 +164,11 @@ export class SchedulerService {
       }
 
       for (const slot of dueSlots) {
+        const topic = await this.resolveScheduledTopic(profile, slot);
         const result = this.repository.ensureSchedulerRun({
           profileId: profile.id,
           scheduledFor: slot.toISOString(),
-          topic: buildScheduledTopic(profile, slot),
+          topic,
           maxAttempts: this.env.SCHEDULER_MAX_RETRIES,
         });
 
@@ -231,15 +234,6 @@ export class SchedulerService {
         topic: run.topic,
       });
 
-      if (job.status === 'waiting_for_manual_clip') {
-        this.repository.completeSchedulerRun(run.id, job.id);
-        this.auditService.info(
-          job.id,
-          `Scheduled run ${run.id} paused for manual clip upload and will continue later.`
-        );
-        return 'completed';
-      }
-
       if (job.status === 'review_pending') {
         this.repository.completeSchedulerRun(run.id, job.id);
         this.auditService.info(
@@ -291,6 +285,33 @@ export class SchedulerService {
       `Scheduled run ${run.id} failed and will retry at ${nextRetryAt}: ${message}`
     );
     return 'retry';
+  }
+
+  private async resolveScheduledTopic(profile: ContentProfile, scheduledFor: Date): Promise<string> {
+    if (profile.topicSource !== 'daily_news') {
+      return buildScheduledTopic(profile, scheduledFor);
+    }
+
+    try {
+      const newsTopic = await this.newsProvider.discoverTopic(profile, scheduledFor);
+      if (newsTopic?.title) {
+        this.auditService.info(
+          null,
+          `News topic selected for ${profile.id}: "${newsTopic.title}"${
+            newsTopic.sourceName ? ` via ${newsTopic.sourceName}` : ''
+          }.`
+        );
+        return newsTopic.title;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown news topic resolution failure.';
+      this.auditService.warn(
+        null,
+        `Daily news topic lookup failed for ${profile.id}; falling back to preferred topics. ${message}`
+      );
+    }
+
+    return buildScheduledTopic(profile, scheduledFor);
   }
 }
 

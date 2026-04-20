@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import {
   buildDeepgramRequestTimeoutMs,
   DeepgramVoiceProvider,
 } from '../src/providers/deepgram-provider.js';
+import { GroqTranscriptionProvider } from '../src/providers/groq-provider.js';
 import { PexelsVisualProvider } from '../src/providers/pexels-provider.js';
 
 type CommandCall = {
@@ -67,7 +68,18 @@ test('DeepgramVoiceProvider writes narration output into the runtime temp direct
     });
 
   try {
-    const provider = new DeepgramVoiceProvider('test-key');
+    const provider = new DeepgramVoiceProvider('test-key', {
+      runCommand: async (command) => {
+        if (command !== 'ffprobe') {
+          throw new Error(`Unexpected command ${command}`);
+        }
+
+        return {
+          stdout: '3.5',
+          stderr: '',
+        };
+      },
+    });
     const result = await provider.synthesize(scriptPackage, profile, 'job-audio', runtimePaths);
 
     assert.equal(result.assetReferences.length, 1);
@@ -169,8 +181,16 @@ test('DeepgramVoiceProvider chunks long narration text before synthesis', async 
     const calls: CommandCall[] = [];
     const provider = new DeepgramVoiceProvider('test-key', {
       ffmpegPath: 'fake-ffmpeg',
+      ffprobePath: 'fake-ffprobe',
       runCommand: async (command, args, cwd) => {
         calls.push({ command, args, cwd });
+
+        if (command === 'fake-ffprobe') {
+          return {
+            stdout: '12',
+            stderr: '',
+          };
+        }
 
         if (command !== 'fake-ffmpeg') {
           throw new Error(`Unexpected command ${command}`);
@@ -205,6 +225,50 @@ test('DeepgramVoiceProvider chunks long narration text before synthesis', async 
     assert.equal(
       await readFile(result.narrationPath ?? '', 'utf8'),
       Array.from({ length: requestCount }, (_, index) => `chunk-${index + 1}`).join('')
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('GroqTranscriptionProvider normalizes word timestamps from narration audio', async () => {
+  const originalFetch = globalThis.fetch;
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-media-'));
+  const runtimePaths = createRuntimePaths(workspaceRoot);
+  const profile = createDefaultProfile();
+  const scriptPackage = createScriptPackage();
+  const narrationPath = join(runtimePaths.tempDirectory, 'job-groq', 'voice', 'narration.mp3');
+  await mkdir(join(runtimePaths.tempDirectory, 'job-groq', 'voice'), { recursive: true });
+  await writeFile(narrationPath, 'audio-bytes', 'utf8');
+
+  globalThis.fetch = async () =>
+    Response.json({
+      text: 'hello world',
+      words: [
+        { word: 'hello', start: 0, end: 0.4, confidence: 0.91 },
+        { word: 'world', start: 0.46, end: 0.82, confidence: 0.88 },
+      ],
+    });
+
+  try {
+    const provider = new GroqTranscriptionProvider('test-key', 'whisper-large-v3-turbo', 5_000);
+    const result = await provider.transcribe({
+      scriptPackage,
+      profile,
+      jobId: 'job-groq',
+      runtimePaths,
+      narrationPath,
+    });
+
+    assert.equal(result.transcriptWords?.length, 2);
+    assert.equal(result.transcriptWords?.[0]?.word, 'hello');
+    assert.equal(result.transcriptWords?.[1]?.endSeconds, 0.82);
+    assert.equal(result.assetReferences[0]?.provider, 'groq');
+    assert.equal(result.warnings.length, 0);
+    assert.match(
+      await readFile(join(runtimePaths.tempDirectory, 'job-groq', 'transcript', 'groq-transcript.json'), 'utf8'),
+      /hello/
     );
   } finally {
     globalThis.fetch = originalFetch;

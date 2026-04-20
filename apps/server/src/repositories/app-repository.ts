@@ -156,7 +156,6 @@ export class AppRepository {
             AND lower(trim(topic)) = lower(trim(?))
             AND status IN (
               'drafting',
-              'waiting_for_manual_clip',
               'review_pending',
               'approved',
               'publish_pending'
@@ -282,9 +281,7 @@ export class AppRepository {
     return DashboardSummarySchema.parse({
       totalProfiles: profiles.length,
       enabledProfiles: profiles.filter((profile) => profile.enabled).length,
-      draftJobs: jobs.filter(
-        (job) => job.status === 'drafting' || job.status === 'waiting_for_manual_clip'
-      ).length,
+      draftJobs: jobs.filter((job) => job.status === 'drafting').length,
       reviewPendingJobs: jobs.filter((job) => job.status === 'review_pending').length,
       publishedJobs: jobs.filter((job) => job.status === 'published').length,
     });

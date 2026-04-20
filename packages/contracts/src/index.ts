@@ -41,8 +41,77 @@ export const SceneSpecSchema = z.object({
   text: z.string().min(1),
   visualQuery: z.string().min(1),
   durationSeconds: z.number().positive(),
+  visualMode: z.enum(['auto', 'manual_veo_required', 'manual_veo_optional']).default('auto'),
 });
 export type SceneSpec = z.infer<typeof SceneSpecSchema>;
+
+export const SceneVisualModeSchema = z.enum([
+  'auto',
+  'manual_veo_required',
+  'manual_veo_optional',
+]);
+export type SceneVisualMode = z.infer<typeof SceneVisualModeSchema>;
+
+export const ContentModeSchema = z.enum(['narration', 'dialogue']);
+export type ContentMode = z.infer<typeof ContentModeSchema>;
+
+export const TopicSourceSchema = z.enum(['preferred_topics', 'daily_news']);
+export type TopicSource = z.infer<typeof TopicSourceSchema>;
+
+export const DialogueSpeakerSchema = z.object({
+  id: normalizedStringSchema,
+  name: normalizedStringSchema,
+  role: z.string().trim().default('host'),
+});
+export type DialogueSpeaker = z.infer<typeof DialogueSpeakerSchema>;
+
+export const DialogueShotTypeSchema = z.enum([
+  'duo',
+  'speaker_focus',
+  'insert_demo',
+  'insert_broll',
+  'data_card',
+]);
+export type DialogueShotType = z.infer<typeof DialogueShotTypeSchema>;
+
+export const DialogueTurnSchema = z.object({
+  order: z.number().int().positive(),
+  speakerId: normalizedStringSchema,
+  sceneOrder: z.number().int().positive(),
+  text: normalizedStringSchema,
+  shotType: DialogueShotTypeSchema.default('duo'),
+  shotNote: z.string().trim().default(''),
+  visualQuery: z.string().trim().nullable().default(null),
+});
+export type DialogueTurn = z.infer<typeof DialogueTurnSchema>;
+
+export const DialoguePackageSchema = z
+  .object({
+    speakers: z.array(DialogueSpeakerSchema).length(2),
+    turns: z.array(DialogueTurnSchema).min(1),
+  })
+  .superRefine((dialogue, context) => {
+    const speakerIds = dialogue.speakers.map((speaker) => speaker.id);
+
+    if (new Set(speakerIds).size !== speakerIds.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Dialogue speakers must use unique ids.',
+        path: ['speakers'],
+      });
+    }
+
+    for (const turn of dialogue.turns) {
+      if (!speakerIds.includes(turn.speakerId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Dialogue turn ${turn.order} references an unknown speaker id.`,
+          path: ['turns'],
+        });
+      }
+    }
+  });
+export type DialoguePackage = z.infer<typeof DialoguePackageSchema>;
 
 export const ScriptPackageSchema = z.object({
   id: z.string().min(1),
@@ -51,6 +120,7 @@ export const ScriptPackageSchema = z.object({
   tags: z.array(z.string().min(1)).default([]),
   scenes: z.array(SceneSpecSchema).min(1),
   totalDurationSeconds: z.number().positive(),
+  dialogue: DialoguePackageSchema.nullable().default(null),
 });
 export type ScriptPackage = z.infer<typeof ScriptPackageSchema>;
 
@@ -58,7 +128,7 @@ export const AssetReferenceSchema = z.object({
   kind: z.enum(['video', 'audio', 'subtitle', 'metadata']),
   path: z.string().min(1),
   label: z.string().min(1),
-  provider: z.enum(['local', 'deepgram', 'pexels', 'veo', 'system']),
+  provider: z.enum(['local', 'deepgram', 'groq', 'pexels', 'veo', 'system']),
   sourceUrl: z.string().url().nullable(),
   mimeType: z.string().nullable(),
   externalId: z.string().nullable(),
@@ -74,6 +144,7 @@ export const ManualClipRequestSchema = z.object({
   sceneOrder: z.number().int().positive(),
   sceneText: z.string().min(1),
   visualQuery: z.string().min(1),
+  visualMode: SceneVisualModeSchema,
   sceneDurationSeconds: z.number().positive(),
   targetClipDurationSeconds: z.number().positive(),
   prompt: z.string().min(1),
@@ -105,6 +176,25 @@ export const AssetBundleSchema = z.object({
 });
 export type AssetBundle = z.infer<typeof AssetBundleSchema>;
 
+export const RenderSceneVisualProviderSchema = z.enum([
+  'dialogue',
+  'local',
+  'deepgram',
+  'groq',
+  'pexels',
+  'veo',
+  'system',
+]);
+export type RenderSceneVisualProvider = z.infer<typeof RenderSceneVisualProviderSchema>;
+
+export const RenderSceneVisualOutcomeSchema = z.object({
+  sceneOrder: z.number().int().positive(),
+  requestedVisualMode: SceneVisualModeSchema,
+  providerUsed: RenderSceneVisualProviderSchema,
+  usedFallback: z.boolean().default(false),
+});
+export type RenderSceneVisualOutcome = z.infer<typeof RenderSceneVisualOutcomeSchema>;
+
 export const RenderBundleSchema = z.object({
   outputVideoPath: z.string().min(1),
   subtitlesPath: z.string().min(1),
@@ -113,7 +203,13 @@ export const RenderBundleSchema = z.object({
   renderedDurationSeconds: z.number().nonnegative().default(0),
   narrationDurationSeconds: z.number().positive().nullable().default(null),
   subtitleCueCount: z.number().int().nonnegative().default(0),
-  subtitleTimingSource: z.enum(['scene_duration', 'voice_timeline']).default('scene_duration'),
+  subtitleTimingSource: z
+    .enum(['scene_duration', 'voice_timeline', 'groq_word_timestamps'])
+    .default('scene_duration'),
+  contentMode: ContentModeSchema.default('narration'),
+  dialogueSpeakerNames: z.array(z.string().min(1)).default([]),
+  dialogueTurnCount: z.number().int().nonnegative().default(0),
+  sceneVisualOutcomes: z.array(RenderSceneVisualOutcomeSchema).default([]),
 });
 export type RenderBundle = z.infer<typeof RenderBundleSchema>;
 
@@ -196,7 +292,7 @@ export const CallToActionStyleSchema = z.enum(['community', 'educational', 'affi
 export type CallToActionStyle = z.infer<typeof CallToActionStyleSchema>;
 
 export const ScriptGenerationMetadataSchema = z.object({
-  provider: z.enum(['local', 'gemini']),
+  provider: z.enum(['local', 'gemini', 'groq']),
   model: z.string().nullable(),
   promptVersion: z.string().min(1),
   mode: z.enum(['stub', 'live']),
@@ -225,6 +321,13 @@ export const ContentProfileSchema = z
     affiliateLinkTemplate: z.string().trim().default(''),
     requireAffiliateDisclosure: z.boolean().default(false),
     affiliateDisclosureTemplate: z.string().trim().default(''),
+    contentMode: ContentModeSchema.default('narration'),
+    topicSource: TopicSourceSchema.default('preferred_topics'),
+    dialogueCharacterPresetId: normalizedStringSchema.default('studio_duo_v2'),
+    dialogueHostAName: normalizedStringSchema.default('Maya'),
+    dialogueHostBName: normalizedStringSchema.default('Theo'),
+    dialogueVoiceA: normalizedStringSchema.default('aura-2-thalia-en'),
+    dialogueVoiceB: normalizedStringSchema.default('aura-2-orion-en'),
     enabled: z.boolean(),
     scheduleCron: normalizedStringSchema,
     targetPlatforms: z.array(PlatformSchema).min(1),
@@ -258,6 +361,17 @@ export const ContentProfileSchema = z
         code: z.ZodIssueCode.custom,
         message: 'Affiliate disclosure text is required when disclosure is enabled.',
         path: ['affiliateDisclosureTemplate'],
+      });
+    }
+
+    if (
+      profile.contentMode === 'dialogue' &&
+      profile.dialogueHostAName.toLowerCase() === profile.dialogueHostBName.toLowerCase()
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Dialogue mode requires two distinct host names.',
+        path: ['dialogueHostBName'],
       });
     }
   });
@@ -372,6 +486,13 @@ export const UpsertProfileRequestSchema = z
     affiliateLinkTemplate: z.string().trim().default(''),
     requireAffiliateDisclosure: z.boolean().default(false),
     affiliateDisclosureTemplate: z.string().trim().default(''),
+    contentMode: ContentModeSchema.default('narration'),
+    topicSource: TopicSourceSchema.default('preferred_topics'),
+    dialogueCharacterPresetId: normalizedStringSchema.default('studio_duo_v2'),
+    dialogueHostAName: normalizedStringSchema.default('Maya'),
+    dialogueHostBName: normalizedStringSchema.default('Theo'),
+    dialogueVoiceA: normalizedStringSchema.default('aura-2-thalia-en'),
+    dialogueVoiceB: normalizedStringSchema.default('aura-2-orion-en'),
     enabled: z.boolean().default(true),
     scheduleCron: normalizedStringSchema,
     targetPlatforms: z.array(PlatformSchema).min(1),
@@ -403,6 +524,17 @@ export const UpsertProfileRequestSchema = z
         code: z.ZodIssueCode.custom,
         message: 'Affiliate disclosure text is required when disclosure is enabled.',
         path: ['affiliateDisclosureTemplate'],
+      });
+    }
+
+    if (
+      profile.contentMode === 'dialogue' &&
+      profile.dialogueHostAName.toLowerCase() === profile.dialogueHostBName.toLowerCase()
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Dialogue mode requires two distinct host names.',
+        path: ['dialogueHostBName'],
       });
     }
   });

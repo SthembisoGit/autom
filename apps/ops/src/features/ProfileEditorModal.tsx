@@ -19,6 +19,22 @@ type ProfileEditorModalProps = {
 
 type ValidationErrors = Partial<Record<keyof ContentProfile, string>>;
 
+const contentModeOptions: Array<{
+  value: ContentProfile['contentMode'];
+  label: string;
+}> = [
+  { value: 'narration', label: 'Narration' },
+  { value: 'dialogue', label: 'Dialogue' },
+];
+
+const topicSourceOptions: Array<{
+  value: ContentProfile['topicSource'];
+  label: string;
+}> = [
+  { value: 'preferred_topics', label: 'Preferred topics' },
+  { value: 'daily_news', label: 'Daily trending news' },
+];
+
 export function ProfileEditorModal({
   open,
   profile,
@@ -159,7 +175,9 @@ export function ProfileEditorModal({
                   })
                 }
               />
-              <small className="field-note">One per line or comma separated.</small>
+              <small className="field-note">
+                One per line or comma separated. In daily news mode, these act as news lenses.
+              </small>
             </label>
 
             <label>
@@ -237,6 +255,117 @@ export function ProfileEditorModal({
                 }
               />
               <small className="field-note">Used as reusable tags in generated scripts.</small>
+            </label>
+          </div>
+        </section>
+
+        <section className="profile-section">
+          <div className="profile-section-heading">
+            <h3>Content mode and voices</h3>
+            <p className="muted">Dialogue mode keeps two recurring hosts on screen.</p>
+          </div>
+
+          <div className="form-grid">
+            <label>
+              <span>Content mode</span>
+              <select
+                value={draft.contentMode}
+                onChange={(event) =>
+                  updateDraft({
+                    contentMode: event.target.value as ContentProfile['contentMode'],
+                  })
+                }
+              >
+                {contentModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span>Topic source</span>
+              <select
+                value={draft.topicSource}
+                onChange={(event) =>
+                  updateDraft({
+                    topicSource: event.target.value as ContentProfile['topicSource'],
+                  })
+                }
+              >
+                {topicSourceOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span>Default voice</span>
+              <input
+                value={draft.defaultVoice}
+                onChange={(event) => updateDraft({ defaultVoice: event.target.value })}
+              />
+            </label>
+
+            <label>
+              <span>Character preset</span>
+              <input
+                value={draft.dialogueCharacterPresetId}
+                onChange={(event) =>
+                  updateDraft({ dialogueCharacterPresetId: event.target.value })
+                }
+              />
+            </label>
+
+            <label>
+              <span>Host A name</span>
+              <input
+                aria-invalid={Boolean(errors.dialogueHostAName)}
+                value={draft.dialogueHostAName}
+                onChange={(event) => updateDraft({ dialogueHostAName: event.target.value })}
+              />
+              {errors.dialogueHostAName ? (
+                <small className="error-text">{errors.dialogueHostAName}</small>
+              ) : null}
+            </label>
+
+            <label>
+              <span>Host B name</span>
+              <input
+                aria-invalid={Boolean(errors.dialogueHostBName)}
+                value={draft.dialogueHostBName}
+                onChange={(event) => updateDraft({ dialogueHostBName: event.target.value })}
+              />
+              {errors.dialogueHostBName ? (
+                <small className="error-text">{errors.dialogueHostBName}</small>
+              ) : null}
+            </label>
+
+            <label>
+              <span>Host A voice</span>
+              <input
+                aria-invalid={Boolean(errors.dialogueVoiceA)}
+                value={draft.dialogueVoiceA}
+                onChange={(event) => updateDraft({ dialogueVoiceA: event.target.value })}
+              />
+              {errors.dialogueVoiceA ? (
+                <small className="error-text">{errors.dialogueVoiceA}</small>
+              ) : null}
+            </label>
+
+            <label>
+              <span>Host B voice</span>
+              <input
+                aria-invalid={Boolean(errors.dialogueVoiceB)}
+                value={draft.dialogueVoiceB}
+                onChange={(event) => updateDraft({ dialogueVoiceB: event.target.value })}
+              />
+              {errors.dialogueVoiceB ? (
+                <small className="error-text">{errors.dialogueVoiceB}</small>
+              ) : null}
             </label>
           </div>
         </section>
@@ -335,14 +464,6 @@ export function ProfileEditorModal({
           {errors.scheduleCron ? <small className="error-text">{errors.scheduleCron}</small> : null}
 
           <div className="form-grid">
-            <label>
-              <span>Default voice</span>
-              <input
-                value={draft.defaultVoice}
-                onChange={(event) => updateDraft({ defaultVoice: event.target.value })}
-              />
-            </label>
-
             <div className="label-wide">
               <span>Target platforms</span>
               <p className="muted">Only platforms enabled for this deployment are shown here.</p>
@@ -443,6 +564,30 @@ function validateProfile(profile: ContentProfile, availableTargetPlatforms: Plat
 
   if (!profile.scheduleCron.trim()) {
     errors.scheduleCron = 'Choose a schedule before saving.';
+  }
+
+  if (profile.contentMode === 'dialogue') {
+    if (!profile.dialogueHostAName.trim()) {
+      errors.dialogueHostAName = 'Dialogue mode needs a first host name.';
+    }
+
+    if (!profile.dialogueHostBName.trim()) {
+      errors.dialogueHostBName = 'Dialogue mode needs a second host name.';
+    }
+
+    if (
+      profile.dialogueHostAName.trim().toLowerCase() === profile.dialogueHostBName.trim().toLowerCase()
+    ) {
+      errors.dialogueHostBName = 'Dialogue hosts must be distinct.';
+    }
+
+    if (!profile.dialogueVoiceA.trim()) {
+      errors.dialogueVoiceA = 'Dialogue mode needs a voice for host A.';
+    }
+
+    if (!profile.dialogueVoiceB.trim()) {
+      errors.dialogueVoiceB = 'Dialogue mode needs a voice for host B.';
+    }
   }
 
   return errors;

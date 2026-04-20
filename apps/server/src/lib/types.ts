@@ -2,6 +2,7 @@ import type { AppEnv, RuntimePaths } from '@autom/config';
 import type {
   AssetReference,
   ContentProfile,
+  ContentMode,
   GenerationJob,
   Platform,
   PlatformConnection,
@@ -16,6 +17,37 @@ export type SceneNarrationTiming = {
   startSeconds: number;
   endSeconds: number;
 };
+
+export type DialogueTurnTiming = {
+  turnOrder: number;
+  sceneOrder: number;
+  speakerId: string;
+  startSeconds: number;
+  endSeconds: number;
+  text: string;
+  shotType: 'duo' | 'speaker_focus' | 'insert_demo' | 'insert_broll' | 'data_card';
+};
+
+export type TranscriptWordTiming = {
+  word: string;
+  startSeconds: number;
+  endSeconds: number;
+  confidence: number | null;
+};
+
+export type NewsTopicContext = {
+  title: string;
+  sourceUrl: string | null;
+  sourceName: string | null;
+  publishedAt: string | null;
+  snippet: string | null;
+  query: string;
+};
+
+export interface NewsProvider {
+  discoverTopic(profile: ContentProfile, scheduledFor?: Date): Promise<NewsTopicContext | null>;
+  resolveContext(profile: ContentProfile, topic: string): Promise<NewsTopicContext | null>;
+}
 
 export type ScriptGenerationResult = {
   scriptPackage: ScriptPackage;
@@ -37,6 +69,21 @@ export interface VoiceProvider {
     assetReferences: AssetReference[];
     warnings: string[];
     sceneNarrationTimeline?: SceneNarrationTiming[] | null;
+    dialogueTurnTimeline?: DialogueTurnTiming[] | null;
+  }>;
+}
+
+export interface TranscriptionProvider {
+  transcribe(input: {
+    scriptPackage: ScriptPackage;
+    profile: ContentProfile;
+    jobId: string;
+    runtimePaths: RuntimePaths;
+    narrationPath: string | null;
+  }): Promise<{
+    transcriptWords: TranscriptWordTiming[] | null;
+    assetReferences: AssetReference[];
+    warnings: string[];
   }>;
 }
 
@@ -65,6 +112,9 @@ export interface MediaRenderer {
     warnings: string[];
     narrationPath: string | null;
     sceneNarrationTimeline?: SceneNarrationTiming[] | null;
+    dialogueTurnTimeline?: DialogueTurnTiming[] | null;
+    transcriptWords?: TranscriptWordTiming[] | null;
+    contentMode?: ContentMode;
     runtimePaths: RuntimePaths;
     onProgress?: (message: string) => void | Promise<void>;
   }): Promise<ReviewPackage>;

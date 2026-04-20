@@ -297,9 +297,9 @@ test('scheduler does not backfill slots from before a profile was re-enabled', a
     assert.ok(resumeAt);
 
     const schedulerHarness = context.schedulerService as unknown as {
-      queueDueRuns(now: Date, lastTickCompletedAt: string | null): number;
+      queueDueRuns(now: Date, lastTickCompletedAt: string | null): Promise<number>;
     };
-    const created = schedulerHarness.queueDueRuns(nextTick, lastTickCompletedAt);
+    const created = await schedulerHarness.queueDueRuns(nextTick, lastTickCompletedAt);
     assert.equal(created >= 1, true);
     assert.equal(
       context.repository.listRecentSchedulerRuns(20).every((run) => run.scheduledFor >= resumeAt),

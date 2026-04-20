@@ -35,6 +35,12 @@ export const AppEnvSchema = z.object({
   FFPROBE_PATH: z.string().min(1).default('ffprobe'),
   FFMPEG_COMMAND_TIMEOUT_SECONDS: z.coerce.number().int().min(30).default(600),
   GEMINI_API_KEY: z.string().optional(),
+  GEMINI_SCRIPT_MODEL: z.string().min(1).default('gemini-2.5-flash'),
+  GROQ_API_KEY: z.string().optional(),
+  GROQ_SCRIPT_MODEL: z.string().min(1).default('llama-3.3-70b-versatile'),
+  GROQ_SCRIPT_TIMEOUT_SECONDS: z.coerce.number().int().min(15).default(45),
+  GROQ_TRANSCRIPTION_MODEL: z.string().min(1).default('whisper-large-v3-turbo'),
+  GROQ_TRANSCRIPTION_TIMEOUT_SECONDS: z.coerce.number().int().min(15).default(120),
   DEEPGRAM_API_KEY: z.string().optional(),
   PEXELS_API_KEY: z.string().optional(),
   SCHEDULER_ENABLED: booleanFromEnvSchema.default(true),
@@ -110,6 +116,10 @@ export function resolveRuntimePaths(mediaRoot: string): RuntimePaths {
 
 export function hasLiveGemini(env: AppEnv): boolean {
   return Boolean(env.GEMINI_API_KEY);
+}
+
+export function hasLiveGroq(env: AppEnv): boolean {
+  return Boolean(env.GROQ_API_KEY);
 }
 
 export function hasLiveDeepgram(env: AppEnv): boolean {

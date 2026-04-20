@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="230" height="370" viewBox="0 0 230 370">
+  <defs>
+    <linearGradient id="hostBBody" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#f6b13c"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="115" cy="284" rx="86" ry="68" fill="#4b2300" opacity="0.48"/>
+  <path d="M40 164C54 126 88 108 116 108C144 108 178 126 190 164L208 332C181 354 148 366 116 366C84 366 51 354 24 332Z" fill="url(#hostBBody)"/>
+  <path d="M78 158C88 176 100 190 116 190C132 190 144 176 154 158L169 190C154 215 136 229 116 229C96 229 78 215 63 190Z" fill="#f2c6a0"/>
+  <path d="M63 168C84 145 101 136 116 136C131 136 149 145 169 168L152 204C141 183 129 173 116 173C103 173 91 183 80 204Z" fill="#6f310d"/>
+  <path d="M54 182C67 194 79 202 90 204L76 264C58 254 43 239 33 216Z" fill="#9e5616" opacity="0.62"/>
+  <path d="M176 182C163 194 151 202 140 204L154 264C172 254 187 239 197 216Z" fill="#9e5616" opacity="0.62"/>
+</svg>

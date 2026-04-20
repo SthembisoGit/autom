@@ -1,3 +1,5 @@
+import type { TranscriptWordTiming } from './types.js';
+
 type SubtitleScene = {
   order: number;
   text: string;
@@ -88,10 +90,22 @@ export function buildSceneNarrationTimeline(
 export function buildSubtitleCues(
   scenes: SubtitleScene[],
   timelineDurationSeconds: number,
-  sceneTimeline?: SceneNarrationTiming[] | null
+  sceneTimeline?: SceneNarrationTiming[] | null,
+  transcriptWords?: TranscriptWordTiming[] | null,
 ): SubtitleCue[] {
   if (scenes.length === 0) {
     return [];
+  }
+
+  if (transcriptWords && transcriptWords.length > 0) {
+    const transcriptCues = buildTranscriptSubtitleCues(
+      transcriptWords,
+      timelineDurationSeconds,
+      null
+    );
+    if (transcriptCues.length > 0) {
+      return transcriptCues;
+    }
   }
 
   const timelineBySceneOrder = new Map(
@@ -125,6 +139,62 @@ export function buildSubtitleCues(
     }
 
     elapsedSeconds = sceneEndSeconds;
+  }
+
+  return cues;
+}
+
+function buildTranscriptSubtitleCues(
+  transcriptWords: TranscriptWordTiming[],
+  timelineDurationSeconds: number,
+  dialogueTurnTimeline: null
+): SubtitleCue[] {
+  const words = transcriptWords
+    .filter((word) => word.endSeconds > word.startSeconds)
+    .map((word) => ({
+      ...word,
+      startSeconds: Math.max(0, word.startSeconds),
+      endSeconds: Math.min(timelineDurationSeconds, word.endSeconds),
+    }))
+    .filter((word) => word.endSeconds > word.startSeconds);
+
+  if (words.length === 0) {
+    return [];
+  }
+
+  const cues: SubtitleCue[] = [];
+  let currentChunk: TranscriptWordTiming[] = [];
+  let activeTurnOrder: number | null = null;
+
+  for (const word of words) {
+    const candidate = [...currentChunk, word];
+    const candidateDuration = candidate[candidate.length - 1].endSeconds - candidate[0].startSeconds;
+    const candidateLines = wrapSubtitleLines(candidate.map((item) => item.word));
+    const nextTurnOrder = null;
+    const shouldFlush =
+      currentChunk.length > 0 &&
+      (candidateDuration > MAX_SUBTITLE_CUE_DURATION_SECONDS ||
+        candidateLines.length > MAX_SUBTITLE_LINES ||
+        (activeTurnOrder !== null && nextTurnOrder !== null && activeTurnOrder !== nextTurnOrder) ||
+        isHardSubtitleBoundary(currentChunk[currentChunk.length - 1], word, candidateDuration));
+
+    if (shouldFlush) {
+      const cue = finalizeTranscriptCue(currentChunk);
+      if (cue) {
+        cues.push(cue);
+      }
+      currentChunk = [word];
+      activeTurnOrder = nextTurnOrder;
+      continue;
+    }
+
+    currentChunk = candidate;
+    activeTurnOrder ??= nextTurnOrder;
+  }
+
+  const lastCue = finalizeTranscriptCue(currentChunk);
+  if (lastCue) {
+    cues.push(lastCue);
   }
 
   return cues;
@@ -232,4 +302,32 @@ function wrapSubtitleLines(words: string[]): string[] {
   }
 
   return lines.length > MAX_SUBTITLE_LINES ? lines.slice(0, MAX_SUBTITLE_LINES) : lines;
+}
+
+function finalizeTranscriptCue(words: TranscriptWordTiming[]): SubtitleCue | null {
+  if (words.length === 0) {
+    return null;
+  }
+
+  return {
+    startSeconds: words[0].startSeconds,
+    endSeconds: Math.max(words[0].startSeconds + 0.1, words[words.length - 1].endSeconds),
+    text: wrapSubtitleLines(words.map((word) => word.word)).join('\n'),
+  };
+}
+
+function isHardSubtitleBoundary(
+  previousWord: TranscriptWordTiming,
+  nextWord: TranscriptWordTiming,
+  candidateDuration: number
+): boolean {
+  if (nextWord.startSeconds - previousWord.endSeconds >= 0.55) {
+    return true;
+  }
+
+  if (candidateDuration < 1.2) {
+    return false;
+  }
+
+  return /[.!?,:;]$/.test(previousWord.word);
 }

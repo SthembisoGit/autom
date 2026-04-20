@@ -290,14 +290,14 @@ test('server workflow creates, reviews, and publishes a job', async () => {
       defaultHashtags: string[];
     }>;
     assert.equal(profiles[0]?.name, 'autoM Media');
-    assert.equal(profiles[0]?.niche, 'high-intent finance, SaaS, and digital growth');
+    assert.equal(profiles[0]?.niche, 'daily trending tech, business, and world news explained simply');
     assert.equal(profiles[0]?.maxDurationSeconds, 90);
     assert.deepEqual(profiles[0]?.preferredTopics.slice(0, 3), [
-      'Best CRM for 2026',
-      'AI workflow automation',
-      'SEO and programmatic SEO guides',
+      'artificial intelligence',
+      'big tech',
+      'business',
     ]);
-    assert.deepEqual(profiles[0]?.defaultHashtags, ['finance', 'saas', 'automation', 'seo']);
+    assert.deepEqual(profiles[0]?.defaultHashtags, ['news', 'technews', 'businessnews', 'explained']);
     assert.deepEqual(profiles[0]?.targetPlatforms, ['local']);
 
     const createResponse = await app.inject({
@@ -403,30 +403,14 @@ test('server workflow creates, reviews, and publishes a job', async () => {
   }
 });
 
-test('server pauses for a manual clip and resumes after upload', async () => {
-  const commandRunner: CommandRunner = async () => ({
-    stdout: JSON.stringify({
-      streams: [
-        {
-          width: 1080,
-          height: 1920,
-          codec_name: 'h264',
-        },
-      ],
-      format: {
-        duration: '8.0',
-      },
-    }),
-    stderr: '',
-  });
-
+test('server no longer pauses for manual clips and continues directly to review', async () => {
   const scriptProvider: ScriptProvider = {
     async generate() {
       return {
         scriptPackage: {
-          id: 'script_manual_clip',
-          title: 'Manual Clip Script',
-          description: 'Testing manual clip intake.',
+          id: 'script_direct_review',
+          title: 'Direct Review Script',
+          description: 'Testing that manual intake is removed.',
           tags: ['crm', 'demo'],
           scenes: [
             {
@@ -461,11 +445,7 @@ test('server pauses for a manual clip and resumes after upload', async () => {
     },
   };
 
-  const { app, workspaceRoot } = await createTestContext({
-    commandRunner,
-    scriptProvider,
-    voiceProvider,
-  });
+  const { app, workspaceRoot } = await createTestContext({ scriptProvider, voiceProvider });
 
   try {
     const profilesResponse = await app.inject({
@@ -483,31 +463,8 @@ test('server pauses for a manual clip and resumes after upload', async () => {
       },
     });
     assert.equal(createResponse.statusCode, 200);
-    assert.equal(createResponse.json().status, 'waiting_for_manual_clip');
-
-    const manualClipBundle = createResponse.json().manualClipBundle as {
-      requests: Array<{
-        sceneOrder: number;
-        prompt: string;
-        audioDirective: string;
-        status: string;
-      }>;
-    };
-    assert.equal(manualClipBundle.requests.length, 1);
-    assert.match(manualClipBundle.requests[0]?.prompt ?? '', /Manual Veo clip brief/i);
-    assert.match(manualClipBundle.requests[0]?.audioDirective ?? '', /no spoken dialogue/i);
-
-    const uploadResponse = await app.inject({
-      method: 'POST',
-      url: `/jobs/${createResponse.json().id}/manual-clips/${manualClipBundle.requests[0]?.sceneOrder}`,
-      headers: {
-        'content-type': 'video/mp4',
-        'x-file-name': 'manual-clip.mp4',
-      },
-      payload: Buffer.from('fake-mp4-data'),
-    });
-    assert.equal(uploadResponse.statusCode, 200);
-    assert.equal(uploadResponse.json().status, 'review_pending');
+    assert.equal(createResponse.json().status, 'review_pending');
+    assert.equal(createResponse.json().manualClipBundle, null);
 
     const detailResponse = await app.inject({
       method: 'GET',
@@ -516,14 +473,6 @@ test('server pauses for a manual clip and resumes after upload', async () => {
     assert.equal(detailResponse.statusCode, 200);
     assert.equal(detailResponse.json().job.status, 'review_pending');
     assert.equal(detailResponse.json().progress.stage, 'ready_for_review');
-    assert.equal(
-      detailResponse
-        .json()
-        .job.reviewPackage.assetBundle.assetReferences.some(
-          (reference: { provider: string }) => reference.provider === 'veo'
-        ),
-      true
-    );
   } finally {
     await app.close();
     await rm(workspaceRoot, { recursive: true, force: true });
@@ -656,7 +605,7 @@ test('server blocks duplicate active jobs for the same profile and topic', async
   }
 });
 
-test('bootstrap upgrades an untouched tech profile to the balanced strategy', async () => {
+test('bootstrap upgrades an untouched tech profile to the daily news dialogue strategy', async () => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-bootstrap-'));
   const env = buildTestEnv(workspaceRoot);
 
@@ -723,14 +672,16 @@ test('bootstrap upgrades an untouched tech profile to the balanced strategy', as
     const migratedProfile = secondContext.repository.getProfile('profile_default');
     assert.ok(migratedProfile);
     assert.equal(migratedProfile.name, 'autoM Media');
-    assert.equal(migratedProfile.niche, 'high-intent finance, SaaS, and digital growth');
+    assert.equal(migratedProfile.niche, 'daily trending tech, business, and world news explained simply');
     assert.equal(migratedProfile.maxDurationSeconds, 90);
     assert.deepEqual(migratedProfile.preferredTopics.slice(0, 3), [
-      'Best CRM for 2026',
-      'AI workflow automation',
-      'SEO and programmatic SEO guides',
+      'artificial intelligence',
+      'big tech',
+      'business',
     ]);
-    assert.deepEqual(migratedProfile.defaultHashtags, ['finance', 'saas', 'automation', 'seo']);
+    assert.deepEqual(migratedProfile.defaultHashtags, ['news', 'technews', 'businessnews', 'explained']);
+    assert.equal(migratedProfile.contentMode, 'dialogue');
+    assert.equal(migratedProfile.topicSource, 'daily_news');
     assert.deepEqual(migratedProfile.targetPlatforms, ['local', 'youtube']);
   } finally {
     await secondContext.schedulerService.stop();
@@ -739,7 +690,7 @@ test('bootstrap upgrades an untouched tech profile to the balanced strategy', as
   }
 });
 
-test('bootstrap still upgrades the older stoic legacy profile to the balanced strategy', async () => {
+test('bootstrap still upgrades the older stoic legacy profile to the daily news dialogue strategy', async () => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-bootstrap-'));
   const env = buildTestEnv(workspaceRoot);
 
@@ -783,14 +734,16 @@ test('bootstrap still upgrades the older stoic legacy profile to the balanced st
   try {
     const migratedProfile = secondContext.repository.getProfile('profile_default');
     assert.ok(migratedProfile);
-    assert.equal(migratedProfile.niche, 'high-intent finance, SaaS, and digital growth');
+    assert.equal(migratedProfile.niche, 'daily trending tech, business, and world news explained simply');
     assert.equal(migratedProfile.maxDurationSeconds, 90);
     assert.deepEqual(migratedProfile.preferredTopics.slice(0, 3), [
-      'Best CRM for 2026',
-      'AI workflow automation',
-      'SEO and programmatic SEO guides',
+      'artificial intelligence',
+      'big tech',
+      'business',
     ]);
-    assert.deepEqual(migratedProfile.defaultHashtags, ['finance', 'saas', 'automation', 'seo']);
+    assert.deepEqual(migratedProfile.defaultHashtags, ['news', 'technews', 'businessnews', 'explained']);
+    assert.equal(migratedProfile.contentMode, 'dialogue');
+    assert.equal(migratedProfile.topicSource, 'daily_news');
     assert.deepEqual(migratedProfile.targetPlatforms, ['local', 'youtube']);
   } finally {
     await secondContext.schedulerService.stop();

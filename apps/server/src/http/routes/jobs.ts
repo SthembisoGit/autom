@@ -53,39 +53,6 @@ export async function registerJobRoutes(
     }
   });
 
-  app.post('/jobs/:jobId/manual-clips/:sceneOrder', async (request, reply) => {
-    const params = request.params as { jobId: string; sceneOrder: string };
-    const sceneOrder = Number.parseInt(params.sceneOrder, 10);
-    if (!Number.isInteger(sceneOrder) || sceneOrder < 1) {
-      reply.code(400);
-      return { message: 'Scene order must be a positive integer.' };
-    }
-
-    const body = Buffer.isBuffer(request.body) ? request.body : null;
-    if (!body || body.length === 0) {
-      reply.code(400);
-      return { message: 'Manual clip upload cannot be empty.' };
-    }
-
-    try {
-      return await services.manualClipsService.uploadManualClip({
-        jobId: params.jobId,
-        sceneOrder,
-        body,
-        contentType:
-          typeof request.headers['content-type'] === 'string'
-            ? request.headers['content-type']
-            : null,
-        originalFileName:
-          typeof request.headers['x-file-name'] === 'string'
-            ? request.headers['x-file-name']
-            : null,
-      });
-    } catch (error) {
-      return sendServiceError(reply, error, 'Unable to upload manual clip.');
-    }
-  });
-
   app.get('/jobs/:jobId/artifacts/render/:artifact', async (request, reply) => {
     const params = request.params as { jobId: string; artifact: string };
     const artifact = parseRenderArtifact(params.artifact);
