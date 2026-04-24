@@ -41,8 +41,14 @@ export const AppEnvSchema = z.object({
   GROQ_SCRIPT_TIMEOUT_SECONDS: z.coerce.number().int().min(15).default(45),
   GROQ_TRANSCRIPTION_MODEL: z.string().min(1).default('whisper-large-v3-turbo'),
   GROQ_TRANSCRIPTION_TIMEOUT_SECONDS: z.coerce.number().int().min(15).default(120),
+  TAVILY_API_KEY: z.string().optional(),
+  COHERE_API_KEY: z.string().optional(),
+  MISTRAL_API_KEY: z.string().optional(),
+  MISTRAL_SCRIPT_MODEL: z.string().min(1).default('mistral-small-latest'),
+  MISTRAL_SCRIPT_TIMEOUT_SECONDS: z.coerce.number().int().min(15).default(45),
   DEEPGRAM_API_KEY: z.string().optional(),
   PEXELS_API_KEY: z.string().optional(),
+  PIXABAY_API_KEY: z.string().optional(),
   SCHEDULER_ENABLED: booleanFromEnvSchema.default(true),
   SCHEDULER_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).default(30),
   SCHEDULER_MAX_RETRIES: z.coerce.number().int().min(1).max(10).default(3),
@@ -122,12 +128,28 @@ export function hasLiveGroq(env: AppEnv): boolean {
   return Boolean(env.GROQ_API_KEY);
 }
 
+export function hasLiveTavily(env: AppEnv): boolean {
+  return Boolean(env.TAVILY_API_KEY);
+}
+
+export function hasLiveCohere(env: AppEnv): boolean {
+  return Boolean(env.COHERE_API_KEY);
+}
+
+export function hasLiveMistral(env: AppEnv): boolean {
+  return Boolean(env.MISTRAL_API_KEY);
+}
+
 export function hasLiveDeepgram(env: AppEnv): boolean {
   return Boolean(env.DEEPGRAM_API_KEY);
 }
 
 export function hasLivePexels(env: AppEnv): boolean {
   return Boolean(env.PEXELS_API_KEY);
+}
+
+export function hasLivePixabay(env: AppEnv): boolean {
+  return Boolean(env.PIXABAY_API_KEY);
 }
 
 export function getEnabledPublisherPlatforms(env: AppEnv): PublisherPlatform[] {

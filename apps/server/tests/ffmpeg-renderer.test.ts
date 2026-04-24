@@ -47,6 +47,11 @@ function createEnv(): AppEnv {
     GROQ_SCRIPT_TIMEOUT_SECONDS: 45,
     GROQ_TRANSCRIPTION_MODEL: 'whisper-large-v3-turbo',
     GROQ_TRANSCRIPTION_TIMEOUT_SECONDS: 120,
+    TAVILY_API_KEY: undefined,
+    COHERE_API_KEY: undefined,
+    MISTRAL_API_KEY: undefined,
+    MISTRAL_SCRIPT_MODEL: 'mistral-small-latest',
+    MISTRAL_SCRIPT_TIMEOUT_SECONDS: 45,
     DEEPGRAM_API_KEY: undefined,
     PEXELS_API_KEY: undefined,
     YOUTUBE_CLIENT_ID: undefined,
@@ -74,6 +79,8 @@ function createJob(): GenerationJob {
     reviewPackage: null,
     publicationResults: [],
     errorMessage: null,
+    archivedAt: null,
+    archivedReason: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -153,6 +160,11 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
           externalId: 'pexels-1',
           sceneOrder: 1,
           query: scriptPackage.scenes[0]?.visualQuery ?? null,
+          retrievalOrigin: 'stock',
+          licenseLabel: 'Pexels License',
+          rightsSummary: 'Scene clip for renderer tests.',
+          attributionRequired: false,
+          entityLabel: null,
         },
         {
           kind: 'audio',
@@ -164,6 +176,11 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
           externalId: null,
           sceneOrder: null,
           query: null,
+          retrievalOrigin: 'research',
+          licenseLabel: null,
+          rightsSummary: null,
+          attributionRequired: false,
+          entityLabel: null,
         },
       ],
       warnings: [],
@@ -208,6 +225,11 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
         call.args.includes(narrationPath)
     );
     assert.equal(Boolean(previewCall), true);
+    assert.equal(previewCall?.args.includes(sourceVideoPath), true);
+    assert.equal(
+      previewCall?.args.some((value) => value.includes('FontSize=14') && value.includes('MarginV=56')),
+      true
+    );
 
     const thumbnailCall = calls.find(
       (call) => call.command === 'fake-ffmpeg' && call.args.includes('thumbnail.jpg')

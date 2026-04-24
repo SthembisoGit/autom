@@ -11,6 +11,8 @@ const uniqueStringListSchema = z
 
 export const JobStatusSchema = z.enum([
   'drafting',
+  'cancelling',
+  'cancelled',
   'waiting_for_manual_clip',
   'review_pending',
   'approved',
@@ -55,8 +57,53 @@ export type SceneVisualMode = z.infer<typeof SceneVisualModeSchema>;
 export const ContentModeSchema = z.enum(['narration', 'dialogue']);
 export type ContentMode = z.infer<typeof ContentModeSchema>;
 
-export const TopicSourceSchema = z.enum(['preferred_topics', 'daily_news']);
+export const TopicSourceSchema = z.enum(['category_pool', 'daily_news', 'preferred_topics']);
 export type TopicSource = z.infer<typeof TopicSourceSchema>;
+
+export const CategoryGoalSchema = z.enum(['revenue', 'reach', 'authority', 'hybrid']);
+export type CategoryGoal = z.infer<typeof CategoryGoalSchema>;
+
+export const CategoryPlatformFitSchema = z.enum(['meta', 'youtube', 'both']);
+export type CategoryPlatformFit = z.infer<typeof CategoryPlatformFitSchema>;
+
+export const CategoryContentTypeBiasSchema = z.enum([
+  'recent_news',
+  'named_person_or_event',
+  'historical_topic',
+  'place_or_institution',
+  'generic_business_or_lifestyle',
+  'product_or_tool_demo',
+  'mixed',
+]);
+export type CategoryContentTypeBias = z.infer<typeof CategoryContentTypeBiasSchema>;
+
+export const CountryValueTierSchema = z.enum(['primary', 'secondary']);
+export type CountryValueTier = z.infer<typeof CountryValueTierSchema>;
+
+export const CategoryLengthStrategySchema = z.object({
+  minSeconds: z.number().int().positive(),
+  maxSeconds: z.number().int().positive(),
+  longformEligible: z.boolean().default(false),
+});
+export type CategoryLengthStrategy = z.infer<typeof CategoryLengthStrategySchema>;
+
+export const ContentCategorySchema = z.object({
+  id: normalizedStringSchema,
+  label: normalizedStringSchema,
+  enabled: z.boolean().default(true),
+  goal: CategoryGoalSchema.default('hybrid'),
+  platformFit: CategoryPlatformFitSchema.default('both'),
+  countryTargets: uniqueStringListSchema,
+  contentTypeBias: CategoryContentTypeBiasSchema.default('mixed'),
+  topicGenerationRules: normalizedStringSchema,
+  evidencePolicy: normalizedStringSchema,
+  visualPolicy: normalizedStringSchema,
+  lengthStrategy: CategoryLengthStrategySchema,
+  hashtagStrategy: normalizedStringSchema,
+  searchLenses: uniqueStringListSchema,
+  exampleTopics: uniqueStringListSchema,
+});
+export type ContentCategory = z.infer<typeof ContentCategorySchema>;
 
 export const DialogueSpeakerSchema = z.object({
   id: normalizedStringSchema,
@@ -128,12 +175,33 @@ export const AssetReferenceSchema = z.object({
   kind: z.enum(['video', 'audio', 'subtitle', 'metadata']),
   path: z.string().min(1),
   label: z.string().min(1),
-  provider: z.enum(['local', 'deepgram', 'groq', 'pexels', 'veo', 'system']),
+  provider: z.enum([
+    'local',
+    'deepgram',
+    'groq',
+    'gemini',
+    'mistral',
+    'tavily',
+    'cohere',
+    'pexels',
+    'pixabay',
+    'unsplash',
+    'wikimedia',
+    'veo',
+    'system',
+  ]),
   sourceUrl: z.string().url().nullable(),
   mimeType: z.string().nullable(),
   externalId: z.string().nullable(),
   sceneOrder: z.number().int().positive().nullable(),
   query: z.string().nullable(),
+  retrievalOrigin: z.enum(['news', 'entity', 'archive', 'stock', 'demo', 'research']).nullable().default(null),
+  licenseLabel: z.string().nullable().default(null),
+  rightsSummary: z.string().nullable().default(null),
+  attributionRequired: z.boolean().default(false),
+  entityLabel: z.string().nullable().default(null),
+  matchQuality: z.enum(['exact', 'relevant', 'fallback']).nullable().default(null),
+  reuseStatus: z.enum(['unique', 'forced_reuse']).nullable().default(null),
 });
 export type AssetReference = z.infer<typeof AssetReferenceSchema>;
 
@@ -182,6 +250,9 @@ export const RenderSceneVisualProviderSchema = z.enum([
   'deepgram',
   'groq',
   'pexels',
+  'pixabay',
+  'unsplash',
+  'wikimedia',
   'veo',
   'system',
 ]);
@@ -210,6 +281,7 @@ export const RenderBundleSchema = z.object({
   dialogueSpeakerNames: z.array(z.string().min(1)).default([]),
   dialogueTurnCount: z.number().int().nonnegative().default(0),
   sceneVisualOutcomes: z.array(RenderSceneVisualOutcomeSchema).default([]),
+  backgroundAudioPresent: z.boolean().default(false),
 });
 export type RenderBundle = z.infer<typeof RenderBundleSchema>;
 
@@ -249,6 +321,7 @@ export const SchedulerRunStatusSchema = z.enum([
   'queued',
   'running',
   'retry_scheduled',
+  'cancelled',
   'completed',
   'failed',
   'skipped',
@@ -292,12 +365,26 @@ export const CallToActionStyleSchema = z.enum(['community', 'educational', 'affi
 export type CallToActionStyle = z.infer<typeof CallToActionStyleSchema>;
 
 export const ScriptGenerationMetadataSchema = z.object({
-  provider: z.enum(['local', 'gemini', 'groq']),
+  provider: z.enum(['local', 'gemini', 'groq', 'mistral']),
   model: z.string().nullable(),
   promptVersion: z.string().min(1),
   mode: z.enum(['stub', 'live']),
   attemptCount: z.number().int().positive(),
   repaired: z.boolean(),
+  searchProvider: z.enum(['none', 'news', 'tavily']).default('none'),
+  rerankProvider: z.enum(['none', 'heuristic', 'cohere']).default('none'),
+  verificationStatus: z.enum(['unverified', 'verified', 'degraded']).default('unverified'),
+  evidenceSourceCount: z.number().int().nonnegative().default(0),
+  fallbackProvider: z.enum(['local', 'gemini', 'groq', 'mistral']).nullable().default(null),
+  providerChain: z.array(z.string().min(1)).default([]),
+  categoryId: z.string().nullable().default(null),
+  categoryLabel: z.string().nullable().default(null),
+  platformFit: CategoryPlatformFitSchema.nullable().default(null),
+  countryTargets: uniqueStringListSchema,
+  monetizationScore: z.number().nonnegative().nullable().default(null),
+  storyAngle: z.string().nullable().default(null),
+  hookStyle: z.string().nullable().default(null),
+  warnings: z.array(z.string()).default([]),
 });
 export type ScriptGenerationMetadata = z.infer<typeof ScriptGenerationMetadataSchema>;
 
@@ -309,10 +396,8 @@ export const ContentProfileSchema = z
     tone: normalizedStringSchema,
     visualStyle: normalizedStringSchema,
     promptDirectives: normalizedStringSchema,
-    preferredTopics: uniqueStringListSchema,
-    bannedTopics: uniqueStringListSchema,
-    bannedTerms: uniqueStringListSchema,
-    sceneCount: z.number().int().min(3).max(8),
+    contentCategories: z.array(ContentCategorySchema).default([]),
+    sceneCount: z.number().int().min(0).max(8).default(0),
     maxDurationSeconds: z.number().int().min(15).max(180),
     defaultHashtags: uniqueStringListSchema,
     callToActionStyle: CallToActionStyleSchema,
@@ -322,7 +407,7 @@ export const ContentProfileSchema = z
     requireAffiliateDisclosure: z.boolean().default(false),
     affiliateDisclosureTemplate: z.string().trim().default(''),
     contentMode: ContentModeSchema.default('narration'),
-    topicSource: TopicSourceSchema.default('preferred_topics'),
+    topicSource: TopicSourceSchema.default('category_pool'),
     dialogueCharacterPresetId: normalizedStringSchema.default('studio_duo_v2'),
     dialogueHostAName: normalizedStringSchema.default('Maya'),
     dialogueHostBName: normalizedStringSchema.default('Theo'),
@@ -336,14 +421,6 @@ export const ContentProfileSchema = z
     updatedAt: normalizedStringSchema,
   })
   .superRefine((profile, context) => {
-    if (profile.maxDurationSeconds < profile.sceneCount * 3) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Max duration must allow at least 3 seconds per scene.',
-        path: ['maxDurationSeconds'],
-      });
-    }
-
     if (profile.callToActionStyle === 'affiliate' && profile.affiliateLinkTemplate.length === 0) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -388,6 +465,8 @@ export const GenerationJobSchema = z.object({
   reviewPackage: ReviewPackageSchema.nullable(),
   publicationResults: z.array(PublicationResultSchema).default([]),
   errorMessage: z.string().nullable(),
+  archivedAt: z.string().nullable().default(null),
+  archivedReason: z.string().nullable().default(null),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 });
@@ -404,6 +483,8 @@ export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
 export const JobProgressStageSchema = z.enum([
   'starting',
+  'cancelling',
+  'cancelled',
   'generating_script',
   'waiting_for_manual_clip',
   'generating_narration',
@@ -474,10 +555,8 @@ export const UpsertProfileRequestSchema = z
     tone: normalizedStringSchema,
     visualStyle: normalizedStringSchema,
     promptDirectives: normalizedStringSchema,
-    preferredTopics: uniqueStringListSchema,
-    bannedTopics: uniqueStringListSchema,
-    bannedTerms: uniqueStringListSchema,
-    sceneCount: z.number().int().min(3).max(8).default(6),
+    contentCategories: z.array(ContentCategorySchema).default([]),
+    sceneCount: z.number().int().min(0).max(8).default(0),
     maxDurationSeconds: z.number().int().min(15).max(180).default(90),
     defaultHashtags: uniqueStringListSchema,
     callToActionStyle: CallToActionStyleSchema.default('community'),
@@ -487,7 +566,7 @@ export const UpsertProfileRequestSchema = z
     requireAffiliateDisclosure: z.boolean().default(false),
     affiliateDisclosureTemplate: z.string().trim().default(''),
     contentMode: ContentModeSchema.default('narration'),
-    topicSource: TopicSourceSchema.default('preferred_topics'),
+    topicSource: TopicSourceSchema.default('category_pool'),
     dialogueCharacterPresetId: normalizedStringSchema.default('studio_duo_v2'),
     dialogueHostAName: normalizedStringSchema.default('Maya'),
     dialogueHostBName: normalizedStringSchema.default('Theo'),
@@ -499,11 +578,11 @@ export const UpsertProfileRequestSchema = z
     defaultVoice: normalizedStringSchema,
   })
   .superRefine((profile, context) => {
-    if (profile.maxDurationSeconds < profile.sceneCount * 3) {
+    if (profile.contentCategories.length === 0) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Max duration must allow at least 3 seconds per scene.',
-        path: ['maxDurationSeconds'],
+        message: 'At least one content category is required.',
+        path: ['contentCategories'],
       });
     }
 

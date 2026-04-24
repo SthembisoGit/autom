@@ -39,6 +39,6 @@ test('GoogleNewsRssProvider discovers a filtered daily news topic from rss items
   assert.ok(article);
   assert.equal(article?.title, 'Nvidia launches new AI chip for enterprise demand');
   assert.equal(article?.sourceName, 'Reuters');
-  assert.equal(article?.query, 'artificial intelligence');
+  assert.equal(article?.query, 'technology news');
   assert.match(article?.snippet ?? '', /enterprise AI chip/i);
 });

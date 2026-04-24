@@ -41,6 +41,50 @@ function buildTestEnv(
   };
 }
 
+function buildProfilePayload(profile: Record<string, unknown>, overrides?: Record<string, unknown>) {
+  return {
+    name: profile.name,
+    niche: profile.niche,
+    tone: profile.tone,
+    visualStyle: profile.visualStyle,
+    promptDirectives: profile.promptDirectives,
+    contentCategories: profile.contentCategories,
+    sceneCount: profile.sceneCount,
+    maxDurationSeconds: profile.maxDurationSeconds,
+    defaultHashtags: profile.defaultHashtags,
+    callToActionStyle: profile.callToActionStyle,
+    callToActionTemplate: profile.callToActionTemplate,
+    callToActionGuardrails: profile.callToActionGuardrails,
+    affiliateLinkTemplate: profile.affiliateLinkTemplate,
+    requireAffiliateDisclosure: profile.requireAffiliateDisclosure,
+    affiliateDisclosureTemplate: profile.affiliateDisclosureTemplate,
+    enabled: profile.enabled,
+    scheduleCron: profile.scheduleCron,
+    targetPlatforms: profile.targetPlatforms,
+    defaultVoice: profile.defaultVoice,
+    contentMode: profile.contentMode,
+    topicSource: profile.topicSource,
+    dialogueCharacterPresetId: profile.dialogueCharacterPresetId,
+    dialogueHostAName: profile.dialogueHostAName,
+    dialogueHostBName: profile.dialogueHostBName,
+    dialogueVoiceA: profile.dialogueVoiceA,
+    dialogueVoiceB: profile.dialogueVoiceB,
+    ...overrides,
+  };
+}
+
+function onlyGenericCategory(profile: Record<string, unknown>) {
+  const categories = Array.isArray(profile.contentCategories) ? profile.contentCategories : [];
+  return categories.map((category) =>
+    typeof category === 'object' && category !== null && 'id' in category
+      ? {
+          ...category,
+          enabled: (category as { id: string }).id === 'practical_life_and_work_tips',
+        }
+      : category
+  );
+}
+
 test('scheduler routes expose overview and manual tick execution', async () => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-scheduler-'));
   const env = buildTestEnv(workspaceRoot);
@@ -60,29 +104,12 @@ test('scheduler routes expose overview and manual tick execution', async () => {
     const updateProfileResponse = await app.inject({
       method: 'PUT',
       url: `/profiles/${profile.id}`,
-      payload: {
-        name: profile.name,
-        niche: profile.niche,
-        tone: profile.tone,
-        visualStyle: profile.visualStyle,
-        promptDirectives: profile.promptDirectives,
-        preferredTopics: profile.preferredTopics,
-        bannedTopics: profile.bannedTopics,
-        bannedTerms: profile.bannedTerms,
-        sceneCount: profile.sceneCount,
-        maxDurationSeconds: profile.maxDurationSeconds,
-        defaultHashtags: profile.defaultHashtags,
-        callToActionStyle: profile.callToActionStyle,
-        callToActionTemplate: profile.callToActionTemplate,
-        callToActionGuardrails: profile.callToActionGuardrails,
-        affiliateLinkTemplate: profile.affiliateLinkTemplate,
-        requireAffiliateDisclosure: profile.requireAffiliateDisclosure,
-        affiliateDisclosureTemplate: profile.affiliateDisclosureTemplate,
+      payload: buildProfilePayload(profile, {
         enabled: true,
         scheduleCron: '* * * * *',
-        targetPlatforms: profile.targetPlatforms,
-        defaultVoice: profile.defaultVoice,
-      },
+        topicSource: 'category_pool',
+        contentCategories: onlyGenericCategory(profile),
+      }),
     });
     assert.equal(updateProfileResponse.statusCode, 200);
 
@@ -130,29 +157,15 @@ test('scheduler schedules retries and eventually marks a run as failed', async (
     const profile = context.profilesService.get('profile_default');
     assert.ok(profile);
 
-    context.profilesService.upsert('profile_default', {
-      name: profile.name,
-      niche: profile.niche,
-      tone: profile.tone,
-      visualStyle: profile.visualStyle,
-      promptDirectives: profile.promptDirectives,
-      preferredTopics: profile.preferredTopics,
-      bannedTopics: profile.bannedTopics,
-      bannedTerms: profile.bannedTerms,
-      sceneCount: profile.sceneCount,
-      maxDurationSeconds: profile.maxDurationSeconds,
-      defaultHashtags: profile.defaultHashtags,
-      callToActionStyle: profile.callToActionStyle,
-      callToActionTemplate: profile.callToActionTemplate,
-      callToActionGuardrails: profile.callToActionGuardrails,
-      affiliateLinkTemplate: profile.affiliateLinkTemplate,
-      requireAffiliateDisclosure: profile.requireAffiliateDisclosure,
-      affiliateDisclosureTemplate: profile.affiliateDisclosureTemplate,
-      enabled: true,
-      scheduleCron: '0 0 1 1 *',
-      targetPlatforms: profile.targetPlatforms,
-      defaultVoice: profile.defaultVoice,
-    });
+    context.profilesService.upsert(
+      'profile_default',
+      buildProfilePayload(profile, {
+        enabled: true,
+        scheduleCron: '0 0 1 1 *',
+        topicSource: 'category_pool',
+        contentCategories: onlyGenericCategory(profile as unknown as Record<string, unknown>),
+      })
+    );
 
     const firstOverview = await context.schedulerService.runDueWork(
       new Date('2026-01-01T00:01:00.000Z')
@@ -165,6 +178,39 @@ test('scheduler schedules retries and eventually marks a run as failed', async (
     );
     assert.equal(secondOverview.recentRuns[0]?.status, 'failed');
     assert.match(secondOverview.recentRuns[0]?.errorMessage ?? '', /Transient renderer outage/i);
+  } finally {
+    await context.schedulerService.stop();
+    context.repository.close();
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('queued scheduler runs can be cancelled before execution', async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-scheduler-cancel-'));
+  const env = buildTestEnv(workspaceRoot);
+
+  const context = await bootstrap({
+    env,
+    mediaRenderer: new StubRenderer(),
+  });
+
+  try {
+    const profile = context.profilesService.get('profile_default');
+    assert.ok(profile);
+
+    const scheduledRun = context.repository.ensureSchedulerRun({
+      profileId: profile.id,
+      topic: 'cancelled scheduled topic',
+      scheduledFor: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+      maxAttempts: 3,
+    });
+
+    const cancelledRun = context.schedulerService.cancelRun(scheduledRun.run.id);
+    assert.equal(cancelledRun.status, 'cancelled');
+    assert.equal(cancelledRun.errorMessage, 'Cancelled by operator before execution.');
+
+    const overview = context.schedulerService.getOverview();
+    assert.equal(overview.recentRuns[0]?.status, 'cancelled');
   } finally {
     await context.schedulerService.stop();
     context.repository.close();
@@ -240,58 +286,30 @@ test('scheduler does not backfill slots from before a profile was re-enabled', a
     const profile = context.profilesService.get('profile_default');
     assert.ok(profile);
 
-    context.profilesService.upsert('profile_default', {
-      name: profile.name,
-      niche: profile.niche,
-      tone: profile.tone,
-      visualStyle: profile.visualStyle,
-      promptDirectives: profile.promptDirectives,
-      preferredTopics: profile.preferredTopics,
-      bannedTopics: profile.bannedTopics,
-      bannedTerms: profile.bannedTerms,
-      sceneCount: profile.sceneCount,
-      maxDurationSeconds: profile.maxDurationSeconds,
-      defaultHashtags: profile.defaultHashtags,
-      callToActionStyle: profile.callToActionStyle,
-      callToActionTemplate: profile.callToActionTemplate,
-      callToActionGuardrails: profile.callToActionGuardrails,
-      affiliateLinkTemplate: profile.affiliateLinkTemplate,
-      requireAffiliateDisclosure: profile.requireAffiliateDisclosure,
-      affiliateDisclosureTemplate: profile.affiliateDisclosureTemplate,
-      enabled: false,
-      scheduleCron: '* * * * *',
-      targetPlatforms: profile.targetPlatforms,
-      defaultVoice: profile.defaultVoice,
-    });
+    context.profilesService.upsert(
+      'profile_default',
+      buildProfilePayload(profile as unknown as Record<string, unknown>, {
+        enabled: false,
+        scheduleCron: '* * * * *',
+        topicSource: 'category_pool',
+        contentCategories: onlyGenericCategory(profile as unknown as Record<string, unknown>),
+      })
+    );
 
     const nextTick = new Date();
     nextTick.setSeconds(0, 0);
     nextTick.setMinutes(nextTick.getMinutes() + 3);
     const lastTickCompletedAt = new Date(nextTick.getTime() - 8 * 60 * 1000).toISOString();
 
-    context.profilesService.upsert('profile_default', {
-      name: profile.name,
-      niche: profile.niche,
-      tone: profile.tone,
-      visualStyle: profile.visualStyle,
-      promptDirectives: profile.promptDirectives,
-      preferredTopics: profile.preferredTopics,
-      bannedTopics: profile.bannedTopics,
-      bannedTerms: profile.bannedTerms,
-      sceneCount: profile.sceneCount,
-      maxDurationSeconds: profile.maxDurationSeconds,
-      defaultHashtags: profile.defaultHashtags,
-      callToActionStyle: profile.callToActionStyle,
-      callToActionTemplate: profile.callToActionTemplate,
-      callToActionGuardrails: profile.callToActionGuardrails,
-      affiliateLinkTemplate: profile.affiliateLinkTemplate,
-      requireAffiliateDisclosure: profile.requireAffiliateDisclosure,
-      affiliateDisclosureTemplate: profile.affiliateDisclosureTemplate,
-      enabled: true,
-      scheduleCron: '* * * * *',
-      targetPlatforms: profile.targetPlatforms,
-      defaultVoice: profile.defaultVoice,
-    });
+    context.profilesService.upsert(
+      'profile_default',
+      buildProfilePayload(profile as unknown as Record<string, unknown>, {
+        enabled: true,
+        scheduleCron: '* * * * *',
+        topicSource: 'category_pool',
+        contentCategories: onlyGenericCategory(profile as unknown as Record<string, unknown>),
+      })
+    );
 
     const resumeAt = context.repository.getSchedulerProfileResumeAt('profile_default');
     assert.ok(resumeAt);
@@ -325,29 +343,15 @@ test('scheduler queues the current slot on the first exact-boundary tick', async
     const profile = context.profilesService.get('profile_default');
     assert.ok(profile);
 
-    context.profilesService.upsert('profile_default', {
-      name: profile.name,
-      niche: profile.niche,
-      tone: profile.tone,
-      visualStyle: profile.visualStyle,
-      promptDirectives: profile.promptDirectives,
-      preferredTopics: profile.preferredTopics,
-      bannedTopics: profile.bannedTopics,
-      bannedTerms: profile.bannedTerms,
-      sceneCount: profile.sceneCount,
-      maxDurationSeconds: profile.maxDurationSeconds,
-      defaultHashtags: profile.defaultHashtags,
-      callToActionStyle: profile.callToActionStyle,
-      callToActionTemplate: profile.callToActionTemplate,
-      callToActionGuardrails: profile.callToActionGuardrails,
-      affiliateLinkTemplate: profile.affiliateLinkTemplate,
-      requireAffiliateDisclosure: profile.requireAffiliateDisclosure,
-      affiliateDisclosureTemplate: profile.affiliateDisclosureTemplate,
-      enabled: true,
-      scheduleCron: '* * * * *',
-      targetPlatforms: profile.targetPlatforms,
-      defaultVoice: profile.defaultVoice,
-    });
+    context.profilesService.upsert(
+      'profile_default',
+      buildProfilePayload(profile as unknown as Record<string, unknown>, {
+        enabled: true,
+        scheduleCron: '* * * * *',
+        topicSource: 'category_pool',
+        contentCategories: onlyGenericCategory(profile as unknown as Record<string, unknown>),
+      })
+    );
 
     const boundaryTick = new Date('2030-01-01T00:00:00.000Z');
     const overview = await context.schedulerService.runDueWork(boundaryTick);

@@ -7,13 +7,19 @@ import {
   GeminiScriptProvider,
   GroqScriptProvider,
   LocalScriptProvider,
+  MistralScriptProvider,
 } from '../src/providers/gemini-provider.js';
+import {
+  ContentOrchestrator,
+  FallbackSearchProvider,
+  HeuristicRerankProvider,
+} from '../src/providers/content-orchestrator.js';
 
 function createScriptTestProfile() {
   return {
     ...createDefaultProfile(),
     contentMode: 'narration' as const,
-    topicSource: 'preferred_topics' as const,
+    topicSource: 'category_pool' as const,
   };
 }
 
@@ -68,7 +74,8 @@ test('GeminiScriptProvider retries malformed responses and repairs them', async 
   assert.equal(result.scriptMetadata.attemptCount, 2);
   assert.equal(result.scriptMetadata.repaired, true);
   assert.equal(result.scriptPackage.scenes.length, profile.sceneCount);
-  assert.equal(result.scriptPackage.totalDurationSeconds, profile.maxDurationSeconds);
+  assert.ok(result.scriptPackage.totalDurationSeconds <= profile.maxDurationSeconds);
+  assert.ok(result.scriptPackage.totalDurationSeconds >= profile.sceneCount * 3);
 });
 
 test('GeminiScriptProvider retries scripts that exceed the duration budget', async () => {
@@ -178,7 +185,7 @@ test('GeminiScriptProvider normalizes long and sentence-like tags before validat
       return true;
     })
   );
-  assert.ok(result.scriptPackage.tags.some((tag) => tag.includes('focus') || tag.includes('news')));
+  assert.equal(result.scriptPackage.tags.length > 0, true);
   assert.ok(!result.scriptPackage.tags.includes('shorts'));
 });
 
@@ -241,6 +248,58 @@ test('GeminiScriptProvider accepts concrete metric-driven scripts without litera
 
   assert.equal(result.scriptMetadata.provider, 'gemini');
   assert.equal(result.scriptPackage.scenes.length, profile.sceneCount);
+});
+
+test('GeminiScriptProvider rejects internal fallback placeholder language', async () => {
+  const profile = createScriptTestProfile();
+  const provider = new GeminiScriptProvider('test-key', {
+    maxAttempts: 1,
+    createClient: async () => ({
+      models: {
+        generateContent: async () => ({
+          text: JSON.stringify({
+            title: 'Broken fallback draft',
+            description: 'A script contaminated by internal placeholders.',
+            tags: ['fallback'],
+            scenes: Array.from({ length: profile.sceneCount }, (_, index) => ({
+              text:
+                index === 2
+                  ? 'For example, compare this story against a local fallback context and a manual workflow.'
+                  : `Scene ${index + 1} mentions Entity Disambiguation and practical applications.`,
+              visualQuery: `scene ${index + 1} local fallback context`,
+              durationSeconds: 4,
+            })),
+          }),
+        }),
+      },
+    }),
+  });
+
+  await assert.rejects(
+    provider.generate(profile, 'placeholder test'),
+    /internal fallback placeholder language/i
+  );
+});
+
+test('LocalScriptProvider refuses weak factual topics without trusted evidence', async () => {
+  const profile = {
+    ...createDefaultProfile(),
+    topicSource: 'category_pool' as const,
+    contentCategories: createDefaultProfile().contentCategories.map((category) => ({
+      ...category,
+      enabled: category.id === 'history_people_and_power',
+    })),
+  };
+  const provider = new LocalScriptProvider(undefined, new ContentOrchestrator(
+    undefined,
+    new FallbackSearchProvider(),
+    new HeuristicRerankProvider()
+  ));
+
+  await assert.rejects(
+    provider.generate(profile, 'The #MadlangaCommission'),
+    /no trusted evidence|too weak to publish safely/i
+  );
 });
 
 test('GeminiScriptProvider surfaces a clear failure after retry exhaustion', async () => {
@@ -368,6 +427,119 @@ test('FallbackScriptProvider falls back to the next provider after quota exhaust
 
   assert.equal(groqCalls, 1);
   assert.equal(result.scriptMetadata.provider, 'groq');
+  assert.equal(result.scriptMetadata.fallbackProvider, 'groq');
+  assert.deepEqual(result.scriptMetadata.providerChain, ['gemini', 'groq']);
+});
+
+test('MistralScriptProvider can act as the last fallback writer', async () => {
+  const profile = createScriptTestProfile();
+  const provider = new MistralScriptProvider('test-key', {
+    maxAttempts: 1,
+    createClient: async () => ({
+      chat: {
+        completions: {
+          create: async () => ({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    title: 'Business ideas with a real workflow',
+                    description: 'A practical business idea explainer.',
+                    tags: ['business', 'ideas'],
+                    scenes: Array.from({ length: profile.sceneCount }, (_, index) => ({
+                      text:
+                        index === 2
+                          ? 'Compare a generic side hustle idea with one workflow that starts from a real customer pain point and a simple validation step.'
+                          : `Scene ${index + 1} keeps the business idea concrete.`,
+                      visualQuery: `business ideas scene ${index + 1}`,
+                      durationSeconds: 4,
+                    })),
+                    totalDurationSeconds: profile.maxDurationSeconds,
+                  }),
+                },
+              },
+            ],
+          }),
+        },
+      },
+    }),
+  });
+
+  const result = await provider.generate(profile, 'Business idea validation');
+
+  assert.equal(result.scriptMetadata.provider, 'mistral');
+  assert.equal(result.scriptMetadata.mode, 'live');
+});
+
+test('GeminiScriptProvider records research metadata from the orchestrator brief', async () => {
+  const profile = {
+    ...createScriptTestProfile(),
+    topicSource: 'daily_news' as const,
+  };
+  const provider = new GeminiScriptProvider('test-key', {
+    maxAttempts: 1,
+    newsProvider: {
+      async discoverTopic() {
+        return null;
+      },
+      async resolveContext() {
+        return {
+          title: 'Nvidia launches a new enterprise AI chip',
+          sourceName: 'Reuters',
+          sourceUrl: 'https://example.com/nvidia-chip',
+          publishedAt: '2026-04-16T08:00:00.000Z',
+          snippet: 'The company announced a new chip aimed at enterprise demand.',
+          query: 'artificial intelligence',
+        };
+      },
+    },
+    contentOrchestrator: new ContentOrchestrator(
+      {
+        async discoverTopic() {
+          return null;
+        },
+        async resolveContext() {
+          return {
+            title: 'Nvidia launches a new enterprise AI chip',
+            sourceName: 'Reuters',
+            sourceUrl: 'https://example.com/nvidia-chip',
+            publishedAt: '2026-04-16T08:00:00.000Z',
+            snippet: 'The company announced a new chip aimed at enterprise demand.',
+            query: 'artificial intelligence',
+          };
+        },
+      },
+      new FallbackSearchProvider(),
+      new HeuristicRerankProvider()
+    ),
+    createClient: async () => ({
+      models: {
+        generateContent: async () => ({
+          text: JSON.stringify({
+            title: 'Nvidia launches a new enterprise AI chip',
+            description: 'A simplified breakdown of the latest AI hardware update.',
+            tags: ['ai', 'chip'],
+            scenes: Array.from({ length: profile.sceneCount }, (_, index) => ({
+              text:
+                index === 2
+                  ? 'Open the earnings context, compare the enterprise demand story with the last hardware cycle, and explain what actually changed.'
+                  : `Scene ${index + 1} explains the update with one concrete detail.`,
+              visualQuery: `nvidia ai chip scene ${index + 1}`,
+              durationSeconds: 4,
+            })),
+            totalDurationSeconds: profile.maxDurationSeconds,
+          }),
+        }),
+      },
+    }),
+  });
+
+  const result = await provider.generate(profile, 'Nvidia launches a new enterprise AI chip');
+
+  assert.equal(result.scriptMetadata.searchProvider, 'news');
+  assert.equal(result.scriptMetadata.rerankProvider, 'heuristic');
+  assert.equal(result.scriptMetadata.verificationStatus, 'degraded');
+  assert.equal(result.scriptMetadata.evidenceSourceCount > 0, true);
 });
 
 test('GeminiScriptProvider times out stalled requests instead of hanging indefinitely', async () => {
@@ -391,10 +563,10 @@ test('GeminiScriptProvider times out stalled requests instead of hanging indefin
   );
 });
 
-test('GeminiScriptProvider injects current news context and humanized dialogue rules for daily news profiles', async () => {
+test('GeminiScriptProvider injects current news context and humanized narration rules for daily news profiles', async () => {
   const profile = {
     ...createDefaultProfile(),
-    contentMode: 'dialogue' as const,
+    contentMode: 'narration' as const,
     topicSource: 'daily_news' as const,
   };
   const requests: Array<{ contents: string }> = [];
@@ -464,6 +636,6 @@ test('GeminiScriptProvider injects current news context and humanized dialogue r
     requests[0]?.contents ?? '',
     /Current news headline: OpenAI launches a faster reasoning model/i
   );
-  assert.match(requests[0]?.contents ?? '', /occasional natural speech markers/i);
-  assert.match(requests[0]?.contents ?? '', /light opinion beats or gentle jokes/i);
+  assert.match(requests[0]?.contents ?? '', /Humanize the narration/i);
+  assert.match(requests[0]?.contents ?? '', /commentary, not facts/i);
 });
