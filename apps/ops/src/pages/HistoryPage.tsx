@@ -13,6 +13,7 @@ export function HistoryPage() {
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [archivingJobId, setArchivingJobId] = useState<string | null>(null);
   const pushToast = useToast();
 
   const load = useCallback(async () => {
@@ -35,6 +36,35 @@ export function HistoryPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function handleArchive(job: GenerationJob) {
+    if (
+      !confirmAction(
+        `Delete "${job.topic}" from the normal lists?\n\nThis keeps the records and files, but removes the run from the main ops views.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setArchivingJobId(job.id);
+      await apiClient.archiveJob(job.id);
+      await load();
+      pushToast({
+        tone: 'success',
+        title: 'Run removed from list',
+        message: `"${job.topic}" is now hidden from the normal ops views.`,
+      });
+    } catch (value) {
+      pushToast({
+        tone: 'danger',
+        title: 'Delete failed',
+        message: value instanceof Error ? value.message : 'Unable to remove the run from the list.',
+      });
+    } finally {
+      setArchivingJobId(null);
+    }
+  }
 
   return (
     <section>
@@ -141,6 +171,16 @@ export function HistoryPage() {
                           Download manifest
                         </a>
                       ) : null}
+                      {canArchiveJob(job) ? (
+                        <button
+                          className="button button-secondary"
+                          disabled={archivingJobId === job.id}
+                          onClick={() => void handleArchive(job)}
+                          type="button"
+                        >
+                          {archivingJobId === job.id ? 'Removing...' : 'Delete from list'}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                   <StatusBadge status={displayStatus} />
@@ -152,6 +192,18 @@ export function HistoryPage() {
       )}
     </section>
   );
+}
+
+function canArchiveJob(job: GenerationJob) {
+  return !job.archivedAt && ['failed', 'published', 'cancelled'].includes(job.status);
+}
+
+function confirmAction(message: string) {
+  if (typeof globalThis.confirm === 'function') {
+    return globalThis.confirm(message);
+  }
+
+  return true;
 }
 
 function hasPublishedLocalResult(job: GenerationJob) {

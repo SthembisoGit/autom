@@ -142,6 +142,8 @@ function createReviewJob(): GenerationJob {
     },
     publicationResults: [],
     errorMessage: null,
+    archivedAt: null,
+    archivedReason: null,
     createdAt: '2026-03-18T09:59:00.000Z',
     updatedAt: '2026-03-18T10:01:00.000Z',
   };

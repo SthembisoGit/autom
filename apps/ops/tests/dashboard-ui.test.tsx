@@ -52,6 +52,7 @@ function createSummary(): DashboardSummary {
 function createScheduler(): SchedulerOverview {
   return {
     enabled: true,
+    running: false,
     pollIntervalSeconds: 30,
     queuedRuns: 0,
     activeRuns: 0,
@@ -78,6 +79,8 @@ function createMonitor(): JobMonitorResponse {
         manualClipBundle: null,
         publicationResults: [],
         errorMessage: 'Failure detail',
+        archivedAt: null,
+        archivedReason: null,
         createdAt: '2026-04-20T09:00:00.000Z',
         updatedAt: '2026-04-20T09:05:00.000Z',
       },

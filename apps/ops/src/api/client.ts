@@ -7,6 +7,7 @@ import type {
   JobMonitorResponse,
   Platform,
   PlatformConnection,
+  SchedulerRun,
   SchedulerOverview,
   UpsertProfileRequest,
 } from '@autom/contracts';
@@ -50,6 +51,12 @@ export const apiClient = {
       body: JSON.stringify({}),
     });
   },
+  cancelSchedulerRun(runId: string): Promise<SchedulerRun> {
+    return request(`/scheduler/runs/${runId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
   listProfiles(): Promise<ContentProfile[]> {
     return request('/profiles');
   },
@@ -67,6 +74,18 @@ export const apiClient = {
   },
   retryJob(jobId: string): Promise<GenerationJob> {
     return request(`/jobs/${jobId}/retry`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+  cancelJob(jobId: string): Promise<GenerationJob> {
+    return request(`/jobs/${jobId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+  archiveJob(jobId: string): Promise<GenerationJob> {
+    return request(`/jobs/${jobId}/archive`, {
       method: 'POST',
       body: JSON.stringify({}),
     });

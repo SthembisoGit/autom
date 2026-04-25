@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import type { JobDetailResponse } from '@autom/contracts';
@@ -16,6 +16,8 @@ export function RunDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const pushToast = useToast();
   const navigate = useNavigate();
 
@@ -135,6 +137,75 @@ export function RunDetailPage() {
     }
   }
 
+  async function handleCancel() {
+    if (!detail) {
+      return;
+    }
+
+    if (
+      !confirmAction(
+        `Cancel "${detail.job.topic}"?\n\nThis stops the run after the current safe step.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsCancelling(true);
+      const updatedJob = await apiClient.cancelJob(detail.job.id);
+      pushToast({
+        tone: 'warning',
+        title: updatedJob.status === 'cancelled' ? 'Run cancelled' : 'Cancellation requested',
+        message:
+          updatedJob.status === 'cancelled'
+            ? `"${detail.job.topic}" was cancelled.`
+            : `"${detail.job.topic}" will stop after the current safe step.`,
+      });
+      await load({ background: true });
+    } catch (value) {
+      pushToast({
+        tone: 'danger',
+        title: 'Cancel failed',
+        message: value instanceof Error ? value.message : 'Unable to cancel the run.',
+      });
+    } finally {
+      setIsCancelling(false);
+    }
+  }
+
+  async function handleArchive() {
+    if (!detail) {
+      return;
+    }
+
+    if (
+      !confirmAction(
+        `Delete "${detail.job.topic}" from the normal lists?\n\nThis keeps the records and files, but removes the run from the main ops views.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsArchiving(true);
+      await apiClient.archiveJob(detail.job.id);
+      pushToast({
+        tone: 'success',
+        title: 'Run removed from list',
+        message: `"${detail.job.topic}" is now hidden from the normal ops views.`,
+      });
+      navigate('/runs');
+    } catch (value) {
+      pushToast({
+        tone: 'danger',
+        title: 'Delete failed',
+        message: value instanceof Error ? value.message : 'Unable to remove the run from the list.',
+      });
+    } finally {
+      setIsArchiving(false);
+    }
+  }
+
   const effectiveStatus = detail
     ? detail.job.status === 'publish_pending' && !shouldPollJob(detail.job)
       ? detail.progress.stage === 'published'
@@ -163,7 +234,11 @@ export function RunDetailPage() {
         loadFailed={loadFailed}
         onRetryJob={handleRetry}
         onRetryPublication={handleRetryPublication}
+        onCancelJob={handleCancel}
+        onArchiveJob={handleArchive}
         retrying={retrying}
+        cancelling={isCancelling}
+        archiving={isArchiving}
         onRefreshBackground={() => load({ background: true })}
         onRetry={() => void load()}
         pushToast={pushToast}
@@ -178,7 +253,11 @@ type RunDetailContentProps = {
   loadFailed: boolean;
   onRetryJob?: () => Promise<void>;
   onRetryPublication?: () => Promise<void>;
+  onCancelJob?: () => Promise<void>;
+  onArchiveJob?: () => Promise<void>;
   retrying?: boolean;
+  cancelling?: boolean;
+  archiving?: boolean;
   onRefreshBackground?: () => Promise<void>;
   onRetry: () => void;
   pushToast?: (toast: ToastInput) => void;
@@ -190,7 +269,11 @@ export function RunDetailContent({
   loadFailed,
   onRetryJob = async () => {},
   onRetryPublication = async () => {},
+  onCancelJob = async () => {},
+  onArchiveJob = async () => {},
   retrying = false,
+  cancelling = false,
+  archiving = false,
   onRefreshBackground = async () => {},
   onRetry,
   pushToast = () => {},
@@ -248,6 +331,8 @@ export function RunDetailContent({
   const renderThumbnailPath = detail.job.reviewPackage?.renderBundle.thumbnailPath ?? null;
   const dialogueSpeakerNames = detail.job.reviewPackage?.renderBundle.dialogueSpeakerNames ?? [];
   const sceneVisualOutcomes = detail.job.reviewPackage?.renderBundle.sceneVisualOutcomes ?? [];
+  const canCancel = detail.job.status === 'drafting' || detail.job.status === 'cancelling' || detail.job.status === 'publish_pending';
+  const canArchive = !detail.job.archivedAt && ['failed', 'published', 'cancelled'].includes(detail.job.status);
 
   return (
     <div className="stack">
@@ -297,6 +382,10 @@ export function RunDetailContent({
             <dt>Assets</dt>
             <dd>{assetReferences.length}</dd>
           </div>
+          <div>
+            <dt>Background bed</dt>
+            <dd>{detail.job.reviewPackage?.renderBundle.backgroundAudioPresent ? 'Present' : 'None'}</dd>
+          </div>
         </div>
         <div className="action-bar">
           {detail.job.reviewPackage ? (
@@ -312,6 +401,26 @@ export function RunDetailContent({
           <Link className="button button-secondary" to="/reviews">
             Open review
           </Link>
+          {canCancel ? (
+            <button
+              className="button button-secondary"
+              disabled={cancelling}
+              onClick={() => void onCancelJob()}
+              type="button"
+            >
+              {cancelling ? 'Cancelling...' : 'Cancel run'}
+            </button>
+          ) : null}
+          {canArchive ? (
+            <button
+              className="button button-secondary"
+              disabled={archiving}
+              onClick={() => void onArchiveJob()}
+              type="button"
+            >
+              {archiving ? 'Removing...' : 'Delete from list'}
+            </button>
+          ) : null}
           <Link className="button button-secondary" to="/runs">
             Back to runs
           </Link>
@@ -693,6 +802,22 @@ export function RunDetailContent({
                     <dt>Repair flow</dt>
                     <dd>{detail.job.scriptMetadata.repaired ? 'Used' : 'Not needed'}</dd>
                   </div>
+                  <div>
+                    <dt>Category</dt>
+                    <dd>{detail.job.scriptMetadata.categoryLabel ?? 'n/a'}</dd>
+                  </div>
+                  <div>
+                    <dt>Platform fit</dt>
+                    <dd>{detail.job.scriptMetadata.platformFit ?? 'n/a'}</dd>
+                  </div>
+                  <div>
+                    <dt>Monetization score</dt>
+                    <dd>{detail.job.scriptMetadata.monetizationScore ?? 'n/a'}</dd>
+                  </div>
+                  <div>
+                    <dt>Hook style</dt>
+                    <dd>{detail.job.scriptMetadata.hookStyle ?? 'n/a'}</dd>
+                  </div>
                 </dl>
               </div>
             ) : null}
@@ -737,6 +862,14 @@ export function RunDetailContent({
                       <div>
                         <dt>Source</dt>
                         <dd>{reference.sourceUrl ?? 'Local artifact'}</dd>
+                      </div>
+                      <div>
+                        <dt>Match quality</dt>
+                        <dd>{reference.matchQuality ?? 'n/a'}</dd>
+                      </div>
+                      <div>
+                        <dt>Reuse status</dt>
+                        <dd>{reference.reuseStatus ?? 'n/a'}</dd>
                       </div>
                     </dl>
                   </div>
@@ -787,7 +920,7 @@ function formatDurationSeconds(value: number | null, fallback = 'Not recorded') 
 }
 
 function shouldPollJob(detail: JobDetailResponse['job']) {
-  if (detail.status === 'drafting') {
+  if (detail.status === 'drafting' || detail.status === 'cancelling') {
     return true;
   }
 
@@ -796,6 +929,14 @@ function shouldPollJob(detail: JobDetailResponse['job']) {
   }
 
   return false;
+}
+
+function confirmAction(message: string) {
+  if (typeof globalThis.confirm === 'function') {
+    return globalThis.confirm(message);
+  }
+
+  return true;
 }
 
 function describePublicationResult(result: JobDetailResponse['job']['publicationResults'][number]) {

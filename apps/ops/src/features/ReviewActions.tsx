@@ -1,3 +1,5 @@
+import React from 'react';
+
 export type ReviewActionKind = 'approve' | 'reject' | 'publish';
 
 type ReviewActionsProps = {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { ContentProfile, Platform } from '@autom/contracts';
+import type { ContentCategory, ContentProfile, Platform } from '@autom/contracts';
 
 import { callToActionStyleOptions } from '../api/client';
 import { Modal } from '../components/Modal';
@@ -31,7 +31,7 @@ const topicSourceOptions: Array<{
   value: ContentProfile['topicSource'];
   label: string;
 }> = [
-  { value: 'preferred_topics', label: 'Preferred topics' },
+  { value: 'category_pool', label: 'Category opportunity engine' },
   { value: 'daily_news', label: 'Daily trending news' },
 ];
 
@@ -151,7 +151,7 @@ export function ProfileEditorModal({
         <section className="profile-section">
           <div className="profile-section-heading">
             <h3>Prompt rules</h3>
-            <p className="muted">These settings keep generation focused and safe.</p>
+            <p className="muted">These settings shape how categories turn into stronger videos.</p>
           </div>
 
           <div className="form-grid">
@@ -162,63 +162,6 @@ export function ProfileEditorModal({
                 value={draft.promptDirectives}
                 onChange={(event) => updateDraft({ promptDirectives: event.target.value })}
               />
-            </label>
-
-            <label>
-              <span>Preferred topics</span>
-              <textarea
-                rows={4}
-                value={formatList(draft.preferredTopics)}
-                onChange={(event) =>
-                  updateDraft({
-                    preferredTopics: parseList(event.target.value),
-                  })
-                }
-              />
-              <small className="field-note">
-                One per line or comma separated. In daily news mode, these act as news lenses.
-              </small>
-            </label>
-
-            <label>
-              <span>Banned topics</span>
-              <textarea
-                rows={4}
-                value={formatList(draft.bannedTopics)}
-                onChange={(event) =>
-                  updateDraft({
-                    bannedTopics: parseList(event.target.value),
-                  })
-                }
-              />
-              <small className="field-note">Generation skips matching topics.</small>
-            </label>
-
-            <label>
-              <span>Banned terms</span>
-              <textarea
-                rows={4}
-                value={formatList(draft.bannedTerms)}
-                onChange={(event) =>
-                  updateDraft({
-                    bannedTerms: parseList(event.target.value),
-                  })
-                }
-              />
-              <small className="field-note">Useful for compliance language and exclusions.</small>
-            </label>
-
-            <label>
-              <span>Scene count</span>
-              <input
-                aria-invalid={Boolean(errors.sceneCount)}
-                min={3}
-                max={8}
-                type="number"
-                value={draft.sceneCount}
-                onChange={(event) => updateDraft({ sceneCount: Number(event.target.value) || 0 })}
-              />
-              {errors.sceneCount ? <small className="error-text">{errors.sceneCount}</small> : null}
             </label>
 
             <label>
@@ -256,6 +199,162 @@ export function ProfileEditorModal({
               />
               <small className="field-note">Used as reusable tags in generated scripts.</small>
             </label>
+          </div>
+
+          <div className="stack">
+            <div className="profile-section-heading">
+              <h3>Content categories</h3>
+              <p className="muted">
+                Categories are the strategy lanes. The AI chooses a fresh topic under one of these
+                lanes each run.
+              </p>
+            </div>
+            {errors.contentCategories ? (
+              <small className="error-text">{errors.contentCategories}</small>
+            ) : null}
+
+            <div className="stack">
+              {draft.contentCategories.map((category, index) => (
+                <article className="card" key={category.id}>
+                  <div className="row-between">
+                    <div>
+                      <p className="eyebrow">Category {index + 1}</p>
+                      <h4>{category.label}</h4>
+                    </div>
+                    <label className="checkbox-row">
+                      <input
+                        checked={category.enabled}
+                        type="checkbox"
+                        onChange={(event) =>
+                          updateCategory(draft, updateDraft, index, {
+                            enabled: event.target.checked,
+                          })
+                        }
+                      />
+                      <span>{category.enabled ? 'Enabled' : 'Disabled'}</span>
+                    </label>
+                  </div>
+
+                  <div className="form-grid">
+                    <label>
+                      <span>Label</span>
+                      <input
+                        value={category.label}
+                        onChange={(event) =>
+                          updateCategory(draft, updateDraft, index, { label: event.target.value })
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      <span>Goal</span>
+                      <select
+                        value={category.goal}
+                        onChange={(event) =>
+                          updateCategory(draft, updateDraft, index, {
+                            goal: event.target.value as ContentCategory['goal'],
+                          })
+                        }
+                      >
+                        <option value="revenue">Revenue</option>
+                        <option value="reach">Reach</option>
+                        <option value="authority">Authority</option>
+                        <option value="hybrid">Hybrid</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Platform fit</span>
+                      <select
+                        value={category.platformFit}
+                        onChange={(event) =>
+                          updateCategory(draft, updateDraft, index, {
+                            platformFit: event.target.value as ContentCategory['platformFit'],
+                          })
+                        }
+                      >
+                        <option value="meta">Meta</option>
+                        <option value="youtube">YouTube</option>
+                        <option value="both">Both</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Content bias</span>
+                      <select
+                        value={category.contentTypeBias}
+                        onChange={(event) =>
+                          updateCategory(draft, updateDraft, index, {
+                            contentTypeBias:
+                              event.target.value as ContentCategory['contentTypeBias'],
+                          })
+                        }
+                      >
+                        <option value="recent_news">Recent news</option>
+                        <option value="named_person_or_event">Named person or event</option>
+                        <option value="historical_topic">Historical topic</option>
+                        <option value="place_or_institution">Place or institution</option>
+                        <option value="generic_business_or_lifestyle">Business or lifestyle</option>
+                        <option value="product_or_tool_demo">Product or tool demo</option>
+                        <option value="mixed">Mixed</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Target countries</span>
+                      <textarea
+                        rows={2}
+                        value={formatList(category.countryTargets)}
+                        onChange={(event) =>
+                          updateCategory(draft, updateDraft, index, {
+                            countryTargets: parseList(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      <span>Search lenses</span>
+                      <textarea
+                        rows={3}
+                        value={formatList(category.searchLenses)}
+                        onChange={(event) =>
+                          updateCategory(draft, updateDraft, index, {
+                            searchLenses: parseList(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      <span>Example topics</span>
+                      <textarea
+                        rows={3}
+                        value={formatList(category.exampleTopics)}
+                        onChange={(event) =>
+                          updateCategory(draft, updateDraft, index, {
+                            exampleTopics: parseList(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+
+                    <label className="label-wide">
+                      <span>Topic generation rules</span>
+                      <textarea
+                        rows={3}
+                        value={category.topicGenerationRules}
+                        onChange={(event) =>
+                          updateCategory(draft, updateDraft, index, {
+                            topicGenerationRules: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                </article>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -519,9 +618,13 @@ export function ProfileEditorModal({
 function cloneProfile(profile: ContentProfile): ContentProfile {
   return {
     ...profile,
-    preferredTopics: [...profile.preferredTopics],
-    bannedTopics: [...profile.bannedTopics],
-    bannedTerms: [...profile.bannedTerms],
+    contentCategories: profile.contentCategories.map((category) => ({
+      ...category,
+      countryTargets: [...category.countryTargets],
+      searchLenses: [...category.searchLenses],
+      exampleTopics: [...category.exampleTopics],
+      lengthStrategy: { ...category.lengthStrategy },
+    })),
     defaultHashtags: [...profile.defaultHashtags],
     targetPlatforms: [...profile.targetPlatforms],
   };
@@ -546,8 +649,8 @@ function validateProfile(profile: ContentProfile, availableTargetPlatforms: Plat
     errors.visualStyle = 'Visual style is required.';
   }
 
-  if (profile.sceneCount < 3 || profile.sceneCount > 8) {
-    errors.sceneCount = 'Scene count must stay between 3 and 8.';
+  if (profile.contentCategories.length === 0) {
+    errors.contentCategories = 'At least one category is required.';
   }
 
   if (profile.maxDurationSeconds < 15 || profile.maxDurationSeconds > 180) {
@@ -606,4 +709,16 @@ function parseList(value: string): string[] {
 
 function formatList(values: string[]): string {
   return values.join('\n');
+}
+
+function updateCategory(
+  profile: ContentProfile,
+  updateDraft: (updates: Partial<ContentProfile>) => void,
+  index: number,
+  updates: Partial<ContentCategory>
+) {
+  const nextCategories = profile.contentCategories.map((category, categoryIndex) =>
+    categoryIndex === index ? { ...category, ...updates } : category
+  );
+  updateDraft({ contentCategories: nextCategories });
 }

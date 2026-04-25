@@ -80,10 +80,8 @@ export function ProfilesPage() {
         tone: profile.tone,
         visualStyle: profile.visualStyle,
         promptDirectives: profile.promptDirectives,
-        preferredTopics: profile.preferredTopics,
-        bannedTopics: profile.bannedTopics,
-        bannedTerms: profile.bannedTerms,
-        sceneCount: profile.sceneCount,
+        contentCategories: profile.contentCategories,
+        sceneCount: 0,
         maxDurationSeconds: profile.maxDurationSeconds,
         contentMode: profile.contentMode,
         topicSource: profile.topicSource,
@@ -225,9 +223,11 @@ export function ProfilesPage() {
                   </div>
 
                   <div className="profile-summary-chip-row">
-                    <span className="profile-summary-chip">{profile.sceneCount} scenes</span>
                     <span className="profile-summary-chip">{profile.maxDurationSeconds}s max</span>
                     <span className="profile-summary-chip">{formatContentModeLabel(profile.contentMode)}</span>
+                    <span className="profile-summary-chip">
+                      {profile.contentCategories.filter((category) => category.enabled).length} categories
+                    </span>
                     <span className="profile-summary-chip">{formatPlatformLabel(profile.targetPlatforms[0])}{profile.targetPlatforms.length > 1 ? ` +${profile.targetPlatforms.length - 1}` : ''}</span>
                     <span className="profile-summary-chip">CTA: {formatCtaLabel(profile.callToActionStyle)}</span>
                   </div>

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import type { GenerationJob, JobMonitorResponse } from '@autom/contracts';
+import type { GenerationJob, JobMonitorResponse, SchedulerOverview, SchedulerRun } from '@autom/contracts';
 
 import { apiClient } from '../api/client';
 import { JobProgressStepper } from '../components/JobProgressStepper';
@@ -13,19 +13,28 @@ type RunsContentProps = {
   isLoading: boolean;
   loadFailed: boolean;
   monitor: JobMonitorResponse | null;
+  scheduler: SchedulerOverview | null;
   historyJobs: GenerationJob[];
   retryingJobId: string | null;
+  mutatingJobId: string | null;
+  mutatingSchedulerRunId: string | null;
   onRetry: () => void;
   onRetryJob: (jobId: string) => Promise<void>;
   onRetryPublication: (jobId: string, topic: string) => Promise<void>;
+  onCancelJob: (jobId: string, topic: string) => Promise<void>;
+  onArchiveJob: (jobId: string, topic: string) => Promise<void>;
+  onCancelSchedulerRun: (runId: string, topic: string) => Promise<void>;
 };
 
 export function RunsPage() {
   const [monitor, setMonitor] = useState<JobMonitorResponse | null>(null);
+  const [scheduler, setScheduler] = useState<SchedulerOverview | null>(null);
   const [historyJobs, setHistoryJobs] = useState<GenerationJob[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
+  const [mutatingJobId, setMutatingJobId] = useState<string | null>(null);
+  const [mutatingSchedulerRunId, setMutatingSchedulerRunId] = useState<string | null>(null);
   const pushToast = useToast();
   const navigate = useNavigate();
 
@@ -36,11 +45,13 @@ export function RunsPage() {
           setIsLoading(true);
         }
 
-        const [jobMonitor, publishedHistory] = await Promise.all([
+        const [jobMonitor, schedulerOverview, publishedHistory] = await Promise.all([
           apiClient.getJobMonitor(),
+          apiClient.getSchedulerOverview(),
           apiClient.listHistory(),
         ]);
         setMonitor(jobMonitor);
+        setScheduler(schedulerOverview);
         setHistoryJobs(publishedHistory);
         setLoadFailed(false);
       } catch (value) {
@@ -132,6 +143,93 @@ export function RunsPage() {
     }
   }
 
+  async function handleCancelJob(jobId: string, topic: string) {
+    if (!confirmAction(`Cancel "${topic}"?\n\nThis stops the run after the current safe step.`)) {
+      return;
+    }
+
+    try {
+      setMutatingJobId(jobId);
+      const updatedJob = await apiClient.cancelJob(jobId);
+      pushToast({
+        tone: 'warning',
+        title: updatedJob.status === 'cancelled' ? 'Run cancelled' : 'Cancellation requested',
+        message:
+          updatedJob.status === 'cancelled'
+            ? `"${topic}" was cancelled.`
+            : `"${topic}" will stop after the current safe step.`,
+      });
+      await load({ background: true });
+    } catch (value) {
+      pushToast({
+        tone: 'danger',
+        title: 'Cancel failed',
+        message: value instanceof Error ? value.message : 'Unable to cancel the run.',
+      });
+    } finally {
+      setMutatingJobId(null);
+    }
+  }
+
+  async function handleArchiveJob(jobId: string, topic: string) {
+    if (
+      !confirmAction(
+        `Delete "${topic}" from the normal lists?\n\nThis keeps the records and files, but removes the run from the main ops views.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setMutatingJobId(jobId);
+      await apiClient.archiveJob(jobId);
+      pushToast({
+        tone: 'success',
+        title: 'Run removed from list',
+        message: `"${topic}" is now hidden from the normal ops views.`,
+      });
+      await load({ background: true });
+    } catch (value) {
+      pushToast({
+        tone: 'danger',
+        title: 'Delete failed',
+        message: value instanceof Error ? value.message : 'Unable to remove the run from the list.',
+      });
+    } finally {
+      setMutatingJobId(null);
+    }
+  }
+
+  async function handleCancelSchedulerRun(runId: string, topic: string) {
+    if (
+      !confirmAction(
+        `Cancel scheduled work for "${topic}"?\n\nThis removes the queued or retry-scheduled run before it starts.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setMutatingSchedulerRunId(runId);
+      await apiClient.cancelSchedulerRun(runId);
+      pushToast({
+        tone: 'warning',
+        title: 'Scheduled work cancelled',
+        message: `"${topic}" was removed from the upcoming scheduler work.`,
+      });
+      await load({ background: true });
+    } catch (value) {
+      pushToast({
+        tone: 'danger',
+        title: 'Cancel failed',
+        message:
+          value instanceof Error ? value.message : 'Unable to cancel the scheduled work.',
+      });
+    } finally {
+      setMutatingSchedulerRunId(null);
+    }
+  }
+
   return (
     <section>
       <header className="page-header">
@@ -149,7 +247,13 @@ export function RunsPage() {
         isLoading={isLoading}
         loadFailed={loadFailed}
         monitor={monitor}
+        scheduler={scheduler}
+        mutatingJobId={mutatingJobId}
+        mutatingSchedulerRunId={mutatingSchedulerRunId}
         onRetry={() => void load()}
+        onArchiveJob={handleArchiveJob}
+        onCancelJob={handleCancelJob}
+        onCancelSchedulerRun={handleCancelSchedulerRun}
         onRetryJob={handleRetry}
         onRetryPublication={handleRetryPublication}
         retryingJobId={retryingJobId}
@@ -162,13 +266,22 @@ export function RunsContent({
   isLoading,
   loadFailed,
   monitor,
+  scheduler,
   historyJobs,
   retryingJobId,
+  mutatingJobId,
+  mutatingSchedulerRunId,
   onRetry,
+  onArchiveJob,
+  onCancelJob,
+  onCancelSchedulerRun,
   onRetryJob,
   onRetryPublication,
 }: RunsContentProps) {
   const recentCompleted = historyJobs.slice(0, 6);
+  const scheduledRuns = (scheduler?.recentRuns ?? []).filter((run) =>
+    ['queued', 'retry_scheduled'].includes(run.status)
+  );
 
   if (isLoading && !monitor) {
     return (
@@ -221,6 +334,16 @@ export function RunsContent({
                   <Link className="button button-secondary" to={`/runs/${entry.job.id}`}>
                     Open run
                   </Link>
+                  {canCancelJob(entry.job) ? (
+                    <button
+                      className="button button-secondary"
+                      disabled={mutatingJobId === entry.job.id}
+                      onClick={() => void onCancelJob(entry.job.id, entry.job.topic)}
+                      type="button"
+                    >
+                      {mutatingJobId === entry.job.id ? 'Cancelling...' : 'Cancel run'}
+                    </button>
+                  ) : null}
                   {entry.job.status === 'review_pending' ? (
                     <Link className="button button-secondary" to="/reviews">
                       Open review
@@ -233,6 +356,52 @@ export function RunsContent({
         ) : (
           <article className="card compact-empty-card">
             <p className="muted">No active generation or publish jobs are running right now.</p>
+          </article>
+        )}
+      </section>
+
+      <section className="dashboard-section">
+        <div className="section-heading-row">
+          <div>
+            <p className="eyebrow">Scheduled</p>
+            <h3>Queued or retry-scheduled</h3>
+          </div>
+          <span className="badge badge-info">{scheduledRuns.length}</span>
+        </div>
+
+        {scheduledRuns.length > 0 ? (
+          <div className="stack">
+            {scheduledRuns.map((run) => (
+              <article className="card run-summary-row" key={run.id}>
+                <div className="row-between">
+                  <div className="stack stack-tight run-row-main">
+                    <div>
+                      <p className="job-link">{run.topic}</p>
+                      <p className="muted">
+                        {run.status === 'retry_scheduled' && run.nextRetryAt
+                          ? `Retry scheduled for ${formatDateTime(run.nextRetryAt)}`
+                          : `Scheduled for ${formatDateTime(run.scheduledFor)}`}
+                      </p>
+                    </div>
+                  </div>
+                  <StatusBadge status={run.status} />
+                </div>
+                <div className="action-bar">
+                  <button
+                    className="button button-secondary"
+                    disabled={mutatingSchedulerRunId === run.id}
+                    onClick={() => void onCancelSchedulerRun(run.id, run.topic)}
+                    type="button"
+                  >
+                    {mutatingSchedulerRunId === run.id ? 'Cancelling...' : 'Cancel run'}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <article className="card compact-empty-card">
+            <p className="muted">No queued scheduler work needs attention right now.</p>
           </article>
         )}
       </section>
@@ -297,6 +466,16 @@ export function RunsContent({
                       </button>
                     )
                   ) : null}
+                  {canArchiveJob(entry.job) ? (
+                    <button
+                      className="button button-secondary"
+                      disabled={mutatingJobId === entry.job.id}
+                      onClick={() => void onArchiveJob(entry.job.id, entry.job.topic)}
+                      type="button"
+                    >
+                      {mutatingJobId === entry.job.id ? 'Removing...' : 'Delete from list'}
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ))}
@@ -309,13 +488,13 @@ export function RunsContent({
       </section>
 
       <section className="dashboard-section">
-        <div className="section-heading-row">
-          <div>
-            <p className="eyebrow">Completed</p>
-            <h3>Recently delivered</h3>
-          </div>
-          <Link className="button button-secondary" to="/history">
-            Open history
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Completed</p>
+            <h3>Recently finished</h3>
+            </div>
+            <Link className="button button-secondary" to="/history">
+              Open history
           </Link>
         </div>
 
@@ -340,6 +519,21 @@ export function RunsContent({
                   </div>
                   <StatusBadge status={job.status === 'publish_pending' ? 'published' : job.status} />
                 </div>
+                <div className="action-bar">
+                  <Link className="button button-secondary" to={`/runs/${job.id}`}>
+                    Open run
+                  </Link>
+                  {canArchiveJob(job) ? (
+                    <button
+                      className="button button-secondary"
+                      disabled={mutatingJobId === job.id}
+                      onClick={() => void onArchiveJob(job.id, job.topic)}
+                      type="button"
+                    >
+                      {mutatingJobId === job.id ? 'Removing...' : 'Delete from list'}
+                    </button>
+                  ) : null}
+                </div>
               </article>
             ))}
           </div>
@@ -351,4 +545,24 @@ export function RunsContent({
       </section>
     </div>
   );
+}
+
+function canCancelJob(job: GenerationJob) {
+  return job.status === 'drafting' || job.status === 'cancelling' || job.status === 'publish_pending';
+}
+
+function canArchiveJob(job: GenerationJob) {
+  return !job.archivedAt && ['failed', 'published', 'cancelled'].includes(job.status);
+}
+
+function confirmAction(message: string) {
+  if (typeof globalThis.confirm === 'function') {
+    return globalThis.confirm(message);
+  }
+
+  return true;
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString();
 }

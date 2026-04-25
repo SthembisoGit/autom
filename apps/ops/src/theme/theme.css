@@ -542,6 +542,11 @@ select {
   color: var(--color-danger);
 }
 
+.badge-cancelling,
+.badge-cancelled {
+  color: var(--color-warning);
+}
+
 .badge-publish-pending,
 .badge-drafting,
 .badge-pending,
