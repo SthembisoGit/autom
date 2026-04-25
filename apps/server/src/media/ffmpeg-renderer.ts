@@ -120,9 +120,7 @@ export class FfmpegRenderer implements MediaRenderer {
       resolvedSceneTimings.map((timing) => [timing.sceneOrder, timing] as const)
     );
     const renderedDurationSeconds =
-      narrationDurationSeconds !== null
-        ? Math.max(targetDurationSeconds, narrationDurationSeconds)
-        : targetDurationSeconds;
+      narrationDurationSeconds !== null ? narrationDurationSeconds : targetDurationSeconds;
     const videoPaddingSeconds = Math.max(
       0,
       renderedDurationSeconds - resolvedSceneTimings.reduce((sum, timing) => sum + timing.durationSeconds, 0)
@@ -152,22 +150,22 @@ export class FfmpegRenderer implements MediaRenderer {
 
     const videoAssetsByScene = indexSceneVideoAssets(input.assetReferences);
     const captionFilter = buildCaptionFilter(contentMode, characterRasters?.subtitleSafeZone ?? null);
+    const backgroundAudioPath = await findBackgroundAudioSource(
+      this.runCommand,
+      input.env.FFPROBE_PATH,
+      input.assetReferences,
+      jobOutputDirectory,
+      baseTimeoutMs
+    );
     await input.onProgress?.(`Subtitle timing source used: ${subtitleTrack.timingSource}.`);
     if (characterRasters) {
       await input.onProgress?.(`Dialogue character preset used: ${characterRasters.presetId}.`);
     }
+    if (backgroundAudioPath) {
+      await input.onProgress?.('Background audio bed sourced from selected footage.');
+    }
     const renderWarnings = [...input.warnings];
     const sceneVisualOutcomes: RenderSceneVisualOutcome[] = [];
-    if (
-      narrationDurationSeconds !== null &&
-      narrationDurationSeconds + narrationOvershootAllowanceSeconds < targetDurationSeconds
-    ) {
-      renderWarnings.push(
-        `Narration ended ${(
-          targetDurationSeconds - narrationDurationSeconds
-        ).toFixed(1)}s early; the preview was padded to keep the runtime steady.`
-      );
-    }
     if (narrationDurationSeconds !== null && narrationDurationSeconds > targetDurationSeconds) {
       renderWarnings.push(
         `Narration ran ${(narrationDurationSeconds - targetDurationSeconds).toFixed(
@@ -277,6 +275,7 @@ export class FfmpegRenderer implements MediaRenderer {
       buildPreviewArgs({
         concatVideoPath,
         narrationPath: input.narrationPath,
+        backgroundAudioPath,
         renderedDurationSeconds,
         videoPaddingSeconds,
         captionFilter,
@@ -346,6 +345,7 @@ export class FfmpegRenderer implements MediaRenderer {
           input.scriptPackage.dialogue?.speakers.map((speaker) => speaker.name) ?? [],
         dialogueTurnCount: input.scriptPackage.dialogue?.turns.length ?? 0,
         sceneVisualOutcomes,
+        backgroundAudioPresent: Boolean(backgroundAudioPath),
       },
       assetBundle: {
         selectedVisualQueries: input.selectedVisualQueries,
@@ -442,6 +442,7 @@ export class StubRenderer implements MediaRenderer {
         contentMode: 'narration',
         dialogueTurnCount: input.scriptPackage.dialogue?.turns.length ?? 0,
         sceneVisualOutcomes: [],
+        backgroundAudioPresent: false,
       },
       assetBundle: {
         selectedVisualQueries: input.selectedVisualQueries,
@@ -468,6 +469,13 @@ function buildAssetBundleReferences(
       externalId: null,
       sceneOrder: null,
       query: null,
+      retrievalOrigin: null,
+      licenseLabel: null,
+      rightsSummary: null,
+      attributionRequired: false,
+      entityLabel: null,
+      matchQuality: null,
+      reuseStatus: null,
     },
   ];
 }
@@ -599,7 +607,7 @@ function resolveSceneVisualDecision(input: {
   if (input.sceneAsset) {
     return {
       mode: 'footage',
-      providerUsed: input.sceneAsset.provider,
+      providerUsed: normalizeVisualProvider(input.sceneAsset.provider),
       usedFallback: false,
       sceneAsset: input.sceneAsset,
       dialogueTurns: input.dialogueTurns,
@@ -626,6 +634,26 @@ function resolveSceneVisualDecision(input: {
     dialogueTurns: [],
     transcriptWords: [],
   };
+}
+
+function normalizeVisualProvider(
+  provider: AssetReference['provider']
+): RenderSceneVisualOutcome['providerUsed'] {
+  if (
+    provider === 'local' ||
+    provider === 'deepgram' ||
+    provider === 'groq' ||
+    provider === 'pexels' ||
+    provider === 'pixabay' ||
+    provider === 'unsplash' ||
+    provider === 'wikimedia' ||
+    provider === 'veo' ||
+    provider === 'system'
+  ) {
+    return provider;
+  }
+
+  return 'system';
 }
 
 function buildFootageSceneArgs(
@@ -866,6 +894,7 @@ function buildDialogueSceneFilter(input: {
 function buildPreviewArgs(input: {
   concatVideoPath: string;
   narrationPath: string | null;
+  backgroundAudioPath: string | null;
   renderedDurationSeconds: number;
   videoPaddingSeconds: number;
   captionFilter: string;
@@ -875,9 +904,18 @@ function buildPreviewArgs(input: {
       ? `tpad=stop_mode=clone:stop_duration=${formatFilterDuration(input.videoPaddingSeconds)},`
       : ''
   }${input.captionFilter}[renderv]`;
-  const audioFilter = `[1:a]apad=whole_dur=${formatFilterDuration(
+  const narrationInputIndex = 1;
+  const backgroundInputIndex = 2;
+  const baseAudioFilter = `[${narrationInputIndex}:a]apad=whole_dur=${formatFilterDuration(
     input.renderedDurationSeconds
-  )},atrim=duration=${formatFilterDuration(input.renderedDurationSeconds)}[rendera]`;
+  )},atrim=duration=${formatFilterDuration(input.renderedDurationSeconds)}[voice]`;
+  const audioFilter = input.backgroundAudioPath
+    ? `${baseAudioFilter};[${backgroundInputIndex}:a]volume=0.08,apad=whole_dur=${formatFilterDuration(
+        input.renderedDurationSeconds
+      )},atrim=duration=${formatFilterDuration(
+        input.renderedDurationSeconds
+      )}[bed];[voice][bed]amix=inputs=2:duration=first:dropout_transition=2[rendera]`
+    : `${baseAudioFilter};[voice]anull[rendera]`;
 
   return [
     '-y',
@@ -886,6 +924,7 @@ function buildPreviewArgs(input: {
     ...(input.narrationPath
       ? ['-i', input.narrationPath]
       : ['-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000']),
+    ...(input.backgroundAudioPath ? ['-stream_loop', '-1', '-i', input.backgroundAudioPath] : []),
     '-filter_complex',
     `${videoFilter};${audioFilter}`,
     '-map',
@@ -985,10 +1024,64 @@ function buildCaptionFilter(
 ): string {
   const marginV =
     contentMode === 'dialogue' && subtitleSafeZone
-      ? Math.max(120, VIDEO_HEIGHT - (subtitleSafeZone.top + subtitleSafeZone.height) + 24)
-      : 180;
+      ? Math.max(36, VIDEO_HEIGHT - (subtitleSafeZone.top + subtitleSafeZone.height) + 8)
+      : 40;
 
-  return `subtitles=captions.srt:force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=${marginV}'`;
+  return `subtitles=captions.srt:force_style='FontName=Arial,FontSize=13,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=${marginV}'`;
+}
+
+async function findBackgroundAudioSource(
+  runCommand: CommandRunner,
+  ffprobePath: string,
+  assetReferences: AssetReference[],
+  cwd: string,
+  timeoutMs: number
+): Promise<string | null> {
+  for (const reference of assetReferences) {
+    if (reference.kind !== 'video') {
+      continue;
+    }
+
+    const hasAudio = await probeHasAudioStream(
+      runCommand,
+      ffprobePath,
+      reference.path,
+      cwd,
+      timeoutMs
+    ).catch(() => false);
+
+    if (hasAudio) {
+      return reference.path;
+    }
+  }
+
+  return null;
+}
+
+async function probeHasAudioStream(
+  runCommand: CommandRunner,
+  ffprobePath: string,
+  mediaPath: string,
+  cwd: string,
+  timeoutMs: number
+): Promise<boolean> {
+  const probe = await runCommand(
+    ffprobePath,
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'a',
+      '-show_entries',
+      'stream=index',
+      '-of',
+      'csv=p=0',
+      mediaPath,
+    ],
+    cwd,
+    timeoutMs
+  );
+  return probe.stdout.trim().length > 0;
 }
 
 function formatFilterDuration(totalSeconds: number): string {

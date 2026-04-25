@@ -9,16 +9,25 @@ import {
 import {
   applySceneVisualModes,
 } from '../lib/dialogue.js';
-import type { NewsProvider, NewsTopicContext, ScriptGenerationResult, ScriptProvider } from '../lib/types.js';
+import type {
+  ContentBrief,
+  NewsProvider,
+  NewsTopicContext,
+  ScriptGenerationResult,
+  ScriptProvider,
+} from '../lib/types.js';
+import { ContentOrchestrator, createContentOrchestrator } from './content-orchestrator.js';
 
 const LOCAL_PROMPT_VERSION = 'local-script-template-v1';
 const GEMINI_PROMPT_VERSION = 'gemini-script-v1';
 const GROQ_PROMPT_VERSION = 'groq-script-v1';
+const MISTRAL_PROMPT_VERSION = 'mistral-script-v1';
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const DEFAULT_GROQ_MODEL = 'llama-3.3-70b-versatile';
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 const DEFAULT_GROQ_REQUEST_TIMEOUT_MS = 45_000;
+const DEFAULT_MISTRAL_REQUEST_TIMEOUT_MS = 45_000;
 const MIN_SCENE_DURATION_SECONDS = 3;
 const MAX_VIDEO_TAGS = 8;
 const MAX_VIDEO_TAG_LENGTH = 40;
@@ -72,7 +81,20 @@ const ACTIONABLE_VERB_PATTERN =
 const QUANTIFIED_DETAIL_PATTERN = /\b(?:\$?\d[\d,.]*%?|\d{4})\b/;
 const NEWS_CONCRETE_PATTERN =
   /\b(according to|reported|announced|said|filed|launched|released|approved|blocked|acquired|raised|cut|tariff|market|shares|company|government|agency|minister|president|court|earnings|forecast|deal|merger|outage|update)\b/i;
+const INTERNAL_FALLBACK_PATTERN =
+  /\b(local fallback context|fallback context|entity disambiguation|manual workflow|records than|practical applications)\b/i;
+const FACTUAL_PLACEHOLDER_VISUAL_PATTERN =
+  /\b(bar chart|flowchart|dashboard|tool screenshot|manual workflow|comparison chart|split screen)\b/i;
+const BORING_SCENE_OPENING_PATTERN =
+  /^(today we|in this video|let's talk about|this is|here we|most people|when it comes to)\b/i;
+const GENERIC_ANY_TOPIC_PATTERN =
+  /\b(everything is changing|the world is moving fast|this matters more than ever|businesses are under pressure|people are paying attention)\b/i;
+const JARGON_HEAVY_PATTERN =
+  /\b(landscape|leverage|ecosystem|transformation|unlock|optimize|synergy|seamless|paradigm|frictionless|stakeholders|utilize)\b/i;
+const ROBOTIC_TRANSITION_PATTERN =
+  /\b(moreover|furthermore|additionally|in today's world|it is important to note|delve into|moving forward)\b/i;
 const GROQ_CHAT_COMPLETIONS_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+const MISTRAL_CHAT_COMPLETIONS_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
 
 type GeminiTextResponse = {
   text?: string | (() => string);
@@ -102,6 +124,7 @@ type GeminiScriptProviderOptions = {
   promptVersion?: string;
   requestTimeoutMs?: number;
   newsProvider?: NewsProvider;
+  contentOrchestrator?: ContentOrchestrator;
 };
 
 type GroqChatMessage = {
@@ -143,6 +166,38 @@ type GroqScriptProviderOptions = {
   promptVersion?: string;
   requestTimeoutMs?: number;
   newsProvider?: NewsProvider;
+  contentOrchestrator?: ContentOrchestrator;
+};
+
+type MistralChatCompletionInput = {
+  model: string;
+  messages: GroqChatMessage[];
+  temperature?: number;
+  response_format?: {
+    type: 'json_object';
+  };
+};
+
+type MistralTextResponse = GroqTextResponse;
+
+type MistralClient = {
+  chat: {
+    completions: {
+      create(input: MistralChatCompletionInput): Promise<MistralTextResponse>;
+    };
+  };
+};
+
+type MistralClientFactory = () => Promise<MistralClient> | MistralClient;
+
+type MistralScriptProviderOptions = {
+  createClient?: MistralClientFactory;
+  maxAttempts?: number;
+  model?: string;
+  promptVersion?: string;
+  requestTimeoutMs?: number;
+  newsProvider?: NewsProvider;
+  contentOrchestrator?: ContentOrchestrator;
 };
 
 type RepairContext = {
@@ -150,10 +205,23 @@ type RepairContext = {
   rawResponse: string;
 };
 
+type ScriptProviderLabel = 'local' | 'gemini' | 'groq' | 'mistral';
+
+type ResearchContext = {
+  newsContext: NewsTopicContext | null;
+  contentBrief: ContentBrief | null;
+};
+
 type SceneDraft = {
   text: string;
   visualQuery: string;
   durationSeconds: number;
+};
+
+type ScenePlan = {
+  minSceneCount: number;
+  targetSceneCount: number;
+  maxSceneCount: number;
 };
 
 class MalformedScriptResponseError extends Error {
@@ -169,17 +237,28 @@ class MalformedScriptResponseError extends Error {
 type GeminiSdkModule = typeof import('@google/genai/web');
 
 export class LocalScriptProvider implements ScriptProvider {
-  constructor(private readonly newsProvider?: NewsProvider) {}
+  constructor(
+    private readonly newsProvider?: NewsProvider,
+    private readonly contentOrchestrator?: ContentOrchestrator
+  ) {}
 
   async generate(profile: ContentProfile, topic: string): Promise<ScriptGenerationResult> {
-    const newsContext = await resolveNewsContext(this.newsProvider, profile, topic);
-    const sceneDurations = allocateDurations(
-      Array.from({ length: profile.sceneCount }, () => 1),
-      profile.maxDurationSeconds
+    const researchContext = await resolveResearchContext(
+      this.contentOrchestrator,
+      this.newsProvider,
+      profile,
+      topic
     );
-    const baseSceneIdeas = buildLocalSceneIdeas(profile, topic, newsContext);
+    const { newsContext, contentBrief } = researchContext;
+    assertResearchSufficiency(topic, contentBrief);
+    const scenePlan = deriveScenePlan(profile.maxDurationSeconds);
+    const baseSceneIdeas = buildLocalSceneIdeas(profile, topic, newsContext, scenePlan.targetSceneCount);
+    const sceneDurations = allocateDurations(
+      Array.from({ length: scenePlan.targetSceneCount }, () => 1),
+      resolveTargetDurationSeconds(baseSceneIdeas, profile.maxDurationSeconds)
+    );
 
-    const scenes = Array.from({ length: profile.sceneCount }, (_, index) => ({
+    const scenes = Array.from({ length: scenePlan.targetSceneCount }, (_, index) => ({
       order: index + 1,
       text: baseSceneIdeas[index] ?? `${topic} lesson ${index + 1}.`,
       visualQuery: `${topic} ${profile.visualStyle} vertical cinematic ${index + 1}`,
@@ -202,7 +281,7 @@ export class LocalScriptProvider implements ScriptProvider {
         ...profile.defaultHashtags,
       ]),
       scenes,
-      totalDurationSeconds: profile.maxDurationSeconds,
+      totalDurationSeconds: sceneDurations.reduce((sum, value) => sum + value, 0),
       dialogue: null,
     });
     const scriptPackage = applySceneVisualModes(profile, baseScriptPackage);
@@ -216,6 +295,20 @@ export class LocalScriptProvider implements ScriptProvider {
         mode: 'stub',
         attemptCount: 1,
         repaired: false,
+        searchProvider: contentBrief?.searchProvider ?? 'none',
+        rerankProvider: contentBrief?.rerankProvider ?? 'none',
+        verificationStatus: contentBrief?.verificationStatus ?? 'unverified',
+        evidenceSourceCount: contentBrief?.evidence.items.length ?? 0,
+        fallbackProvider: null,
+        providerChain: ['local'],
+        categoryId: contentBrief?.category?.id ?? null,
+        categoryLabel: contentBrief?.category?.label ?? null,
+        platformFit: contentBrief?.category?.platformFit ?? null,
+        countryTargets: contentBrief?.category?.countryTargets ?? [],
+        monetizationScore: contentBrief?.monetizationScore?.total ?? null,
+        storyAngle: contentBrief?.storyAngle?.highStakesAngle ?? null,
+        hookStyle: contentBrief?.storyAngle?.hookStyle ?? null,
+        warnings: contentBrief?.warnings ?? [],
       },
     };
   }
@@ -228,6 +321,7 @@ export class GroqScriptProvider implements ScriptProvider {
   private readonly promptVersion: string;
   private readonly requestTimeoutMs: number;
   private readonly newsProvider?: NewsProvider;
+  private readonly contentOrchestrator?: ContentOrchestrator;
 
   constructor(
     private readonly apiKey: string,
@@ -238,13 +332,21 @@ export class GroqScriptProvider implements ScriptProvider {
     this.promptVersion = options.promptVersion ?? GROQ_PROMPT_VERSION;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_GROQ_REQUEST_TIMEOUT_MS;
     this.newsProvider = options.newsProvider;
+    this.contentOrchestrator = options.contentOrchestrator;
     this.createClient =
       options.createClient ?? (() => createGroqClient(this.apiKey, this.requestTimeoutMs));
   }
 
   async generate(profile: ContentProfile, topic: string): Promise<ScriptGenerationResult> {
     const client = await this.createClient();
-    const newsContext = await resolveNewsContext(this.newsProvider, profile, topic);
+    const researchContext = await resolveResearchContext(
+      this.contentOrchestrator,
+      this.newsProvider,
+      profile,
+      topic
+    );
+    const { newsContext, contentBrief } = researchContext;
+    assertResearchSufficiency(topic, contentBrief);
     let repairContext: RepairContext | null = null;
     let lastIssue = 'Groq did not return a usable script.';
 
@@ -261,8 +363,8 @@ export class GroqScriptProvider implements ScriptProvider {
             {
               role: 'user',
               content: repairContext
-                ? buildRepairPrompt(profile, topic, repairContext, newsContext)
-                : buildGenerationPrompt(profile, topic, newsContext),
+                ? buildRepairPrompt(profile, topic, repairContext, newsContext, contentBrief)
+                : buildGenerationPrompt(profile, topic, newsContext, contentBrief),
             },
           ],
           temperature: 0.2,
@@ -272,19 +374,33 @@ export class GroqScriptProvider implements ScriptProvider {
         });
 
         const rawText = readGroqResponseText(response);
-        const scriptPackage = parseGeminiScript(rawText, profile, topic);
+        const scriptPackage = parseGeminiScript(rawText, profile, topic, contentBrief);
 
         return {
           scriptPackage,
           scriptMetadata: {
             provider: 'groq',
-            model: this.model,
-            promptVersion: this.promptVersion,
-            mode: 'live',
-            attemptCount: attempt,
-            repaired: repairContext !== null,
-          },
-        };
+              model: this.model,
+              promptVersion: this.promptVersion,
+              mode: 'live',
+              attemptCount: attempt,
+              repaired: repairContext !== null,
+              searchProvider: contentBrief?.searchProvider ?? 'none',
+              rerankProvider: contentBrief?.rerankProvider ?? 'none',
+              verificationStatus: contentBrief?.verificationStatus ?? 'unverified',
+              evidenceSourceCount: contentBrief?.evidence.items.length ?? 0,
+              fallbackProvider: null,
+              providerChain: ['groq'],
+              categoryId: contentBrief?.category?.id ?? null,
+              categoryLabel: contentBrief?.category?.label ?? null,
+              platformFit: contentBrief?.category?.platformFit ?? null,
+              countryTargets: contentBrief?.category?.countryTargets ?? [],
+              monetizationScore: contentBrief?.monetizationScore?.total ?? null,
+              storyAngle: contentBrief?.storyAngle?.highStakesAngle ?? null,
+              hookStyle: contentBrief?.storyAngle?.hookStyle ?? null,
+              warnings: contentBrief?.warnings ?? [],
+            },
+          };
       } catch (error) {
         lastIssue = error instanceof Error ? error.message : 'Unknown Groq generation failure.';
         repairContext =
@@ -304,17 +420,34 @@ export class GroqScriptProvider implements ScriptProvider {
 export class FallbackScriptProvider implements ScriptProvider {
   constructor(
     private readonly providers: Array<{
-      label: string;
+      label: ScriptProviderLabel;
       provider: ScriptProvider;
     }>
   ) {}
 
   async generate(profile: ContentProfile, topic: string): Promise<ScriptGenerationResult> {
     const failures: string[] = [];
+    const attemptedProviders: string[] = [];
 
     for (const candidate of this.providers) {
       try {
-        return await candidate.provider.generate(profile, topic);
+        attemptedProviders.push(candidate.label);
+        const result = await candidate.provider.generate(profile, topic);
+        return {
+          ...result,
+          scriptMetadata: {
+            ...result.scriptMetadata,
+            fallbackProvider: attemptedProviders.length > 1 ? candidate.label : null,
+            providerChain: attemptedProviders,
+            warnings:
+              attemptedProviders.length > 1
+                ? [
+                    ...result.scriptMetadata.warnings,
+                    `Primary script provider fell back to ${candidate.label}.`,
+                  ]
+                : result.scriptMetadata.warnings,
+          },
+        };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown script generation failure.';
         failures.push(`${candidate.label}: ${message}`);
@@ -325,6 +458,109 @@ export class FallbackScriptProvider implements ScriptProvider {
   }
 }
 
+export class MistralScriptProvider implements ScriptProvider {
+  private readonly createClient: MistralClientFactory;
+  private readonly maxAttempts: number;
+  private readonly model: string;
+  private readonly promptVersion: string;
+  private readonly requestTimeoutMs: number;
+  private readonly newsProvider?: NewsProvider;
+  private readonly contentOrchestrator?: ContentOrchestrator;
+
+  constructor(
+    private readonly apiKey: string,
+    options: MistralScriptProviderOptions = {}
+  ) {
+    this.maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    this.model = options.model ?? 'mistral-small-latest';
+    this.promptVersion = options.promptVersion ?? MISTRAL_PROMPT_VERSION;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_MISTRAL_REQUEST_TIMEOUT_MS;
+    this.newsProvider = options.newsProvider;
+    this.contentOrchestrator = options.contentOrchestrator;
+    this.createClient =
+      options.createClient ?? (() => createMistralClient(this.apiKey, this.requestTimeoutMs));
+  }
+
+  async generate(profile: ContentProfile, topic: string): Promise<ScriptGenerationResult> {
+    const client = await this.createClient();
+    const researchContext = await resolveResearchContext(
+      this.contentOrchestrator,
+      this.newsProvider,
+      profile,
+      topic
+    );
+    const { newsContext, contentBrief } = researchContext;
+    assertResearchSufficiency(topic, contentBrief);
+    let repairContext: RepairContext | null = null;
+    let lastIssue = 'Mistral did not return a usable script.';
+
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      try {
+        const response = await client.chat.completions.create({
+          model: this.model,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Return only valid JSON that matches the requested schema and constraints. Do not wrap the response in markdown fences.',
+            },
+            {
+              role: 'user',
+              content: repairContext
+                ? buildRepairPrompt(profile, topic, repairContext, newsContext, contentBrief)
+                : buildGenerationPrompt(profile, topic, newsContext, contentBrief),
+            },
+          ],
+          temperature: 0.2,
+          response_format: {
+            type: 'json_object',
+          },
+        });
+
+        const rawText = readGroqResponseText(response);
+        const scriptPackage = parseGeminiScript(rawText, profile, topic, contentBrief);
+
+        return {
+          scriptPackage,
+          scriptMetadata: {
+            provider: 'mistral',
+            model: this.model,
+            promptVersion: this.promptVersion,
+            mode: 'live',
+            attemptCount: attempt,
+            repaired: repairContext !== null,
+            searchProvider: contentBrief?.searchProvider ?? 'none',
+            rerankProvider: contentBrief?.rerankProvider ?? 'none',
+            verificationStatus: contentBrief?.verificationStatus ?? 'unverified',
+            evidenceSourceCount: contentBrief?.evidence.items.length ?? 0,
+            fallbackProvider: null,
+            providerChain: ['mistral'],
+            categoryId: contentBrief?.category?.id ?? null,
+            categoryLabel: contentBrief?.category?.label ?? null,
+            platformFit: contentBrief?.category?.platformFit ?? null,
+            countryTargets: contentBrief?.category?.countryTargets ?? [],
+            monetizationScore: contentBrief?.monetizationScore?.total ?? null,
+            storyAngle: contentBrief?.storyAngle?.highStakesAngle ?? null,
+            hookStyle: contentBrief?.storyAngle?.hookStyle ?? null,
+            warnings: contentBrief?.warnings ?? [],
+          },
+        };
+      } catch (error) {
+        lastIssue = error instanceof Error ? error.message : 'Unknown Mistral generation failure.';
+        repairContext =
+          error instanceof MalformedScriptResponseError
+            ? {
+                issue: lastIssue,
+                rawResponse: error.rawResponse,
+              }
+            : null;
+      }
+    }
+
+    throw new Error(`Mistral generation failed after ${this.maxAttempts} attempts. ${lastIssue}`);
+  }
+}
+
 export class GeminiScriptProvider implements ScriptProvider {
   private readonly createClient: GeminiClientFactory;
   private readonly maxAttempts: number;
@@ -332,6 +568,7 @@ export class GeminiScriptProvider implements ScriptProvider {
   private readonly promptVersion: string;
   private readonly requestTimeoutMs: number;
   private readonly newsProvider?: NewsProvider;
+  private readonly contentOrchestrator?: ContentOrchestrator;
 
   constructor(
     private readonly apiKey: string,
@@ -343,11 +580,19 @@ export class GeminiScriptProvider implements ScriptProvider {
     this.promptVersion = options.promptVersion ?? GEMINI_PROMPT_VERSION;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.newsProvider = options.newsProvider;
+    this.contentOrchestrator = options.contentOrchestrator;
   }
 
   async generate(profile: ContentProfile, topic: string): Promise<ScriptGenerationResult> {
     const client = await this.createClient();
-    const newsContext = await resolveNewsContext(this.newsProvider, profile, topic);
+    const researchContext = await resolveResearchContext(
+      this.contentOrchestrator,
+      this.newsProvider,
+      profile,
+      topic
+    );
+    const { newsContext, contentBrief } = researchContext;
+    assertResearchSufficiency(topic, contentBrief);
     let repairContext: RepairContext | null = null;
     let lastIssue = 'Gemini did not return a usable script.';
 
@@ -357,8 +602,8 @@ export class GeminiScriptProvider implements ScriptProvider {
           client.models.generateContent({
             model: this.model,
             contents: repairContext
-              ? buildRepairPrompt(profile, topic, repairContext, newsContext)
-              : buildGenerationPrompt(profile, topic, newsContext),
+              ? buildRepairPrompt(profile, topic, repairContext, newsContext, contentBrief)
+              : buildGenerationPrompt(profile, topic, newsContext, contentBrief),
             config: {
               responseMimeType: 'application/json',
               responseJsonSchema: buildScriptResponseJsonSchema(profile),
@@ -369,7 +614,7 @@ export class GeminiScriptProvider implements ScriptProvider {
         );
 
         const rawText = readGeminiResponseText(response);
-        const scriptPackage = parseGeminiScript(rawText, profile, topic);
+        const scriptPackage = parseGeminiScript(rawText, profile, topic, contentBrief);
 
         return {
           scriptPackage,
@@ -380,6 +625,20 @@ export class GeminiScriptProvider implements ScriptProvider {
             mode: 'live',
             attemptCount: attempt,
             repaired: repairContext !== null,
+            searchProvider: contentBrief?.searchProvider ?? 'none',
+            rerankProvider: contentBrief?.rerankProvider ?? 'none',
+            verificationStatus: contentBrief?.verificationStatus ?? 'unverified',
+            evidenceSourceCount: contentBrief?.evidence.items.length ?? 0,
+            fallbackProvider: null,
+            providerChain: ['gemini'],
+            categoryId: contentBrief?.category?.id ?? null,
+            categoryLabel: contentBrief?.category?.label ?? null,
+            platformFit: contentBrief?.category?.platformFit ?? null,
+            countryTargets: contentBrief?.category?.countryTargets ?? [],
+            monetizationScore: contentBrief?.monetizationScore?.total ?? null,
+            storyAngle: contentBrief?.storyAngle?.highStakesAngle ?? null,
+            hookStyle: contentBrief?.storyAngle?.hookStyle ?? null,
+            warnings: contentBrief?.warnings ?? [],
           },
         };
       } catch (error) {
@@ -399,7 +658,8 @@ export class GeminiScriptProvider implements ScriptProvider {
 }
 
 export function createScriptProvider(env: AppEnv, newsProvider?: NewsProvider): ScriptProvider {
-  const providers: Array<{ label: string; provider: ScriptProvider }> = [];
+  const contentOrchestrator = createContentOrchestrator(env, newsProvider);
+  const providers: Array<{ label: ScriptProviderLabel; provider: ScriptProvider }> = [];
 
   if (env.GEMINI_API_KEY) {
     providers.push({
@@ -407,6 +667,7 @@ export function createScriptProvider(env: AppEnv, newsProvider?: NewsProvider): 
       provider: new GeminiScriptProvider(env.GEMINI_API_KEY, {
         model: env.GEMINI_SCRIPT_MODEL,
         newsProvider,
+        contentOrchestrator,
       }),
     });
   }
@@ -418,13 +679,26 @@ export function createScriptProvider(env: AppEnv, newsProvider?: NewsProvider): 
         model: env.GROQ_SCRIPT_MODEL,
         requestTimeoutMs: env.GROQ_SCRIPT_TIMEOUT_SECONDS * 1000,
         newsProvider,
+        contentOrchestrator,
+      }),
+    });
+  }
+
+  if (env.MISTRAL_API_KEY) {
+    providers.push({
+      label: 'mistral',
+      provider: new MistralScriptProvider(env.MISTRAL_API_KEY, {
+        model: env.MISTRAL_SCRIPT_MODEL,
+        requestTimeoutMs: env.MISTRAL_SCRIPT_TIMEOUT_SECONDS * 1000,
+        newsProvider,
+        contentOrchestrator,
       }),
     });
   }
 
   providers.push({
     label: 'local',
-    provider: new LocalScriptProvider(newsProvider),
+    provider: new LocalScriptProvider(newsProvider, contentOrchestrator),
   });
 
   return providers.length === 1 ? providers[0].provider : new FallbackScriptProvider(providers);
@@ -433,28 +707,38 @@ export function createScriptProvider(env: AppEnv, newsProvider?: NewsProvider): 
 function buildGenerationPrompt(
   profile: ContentProfile,
   topic: string,
-  newsContext: NewsTopicContext | null
+  newsContext: NewsTopicContext | null,
+  contentBrief: ContentBrief | null
 ): string {
+  const scenePlan = deriveScenePlan(profile.maxDurationSeconds);
   const targetWordsTotal = Math.max(
-    profile.sceneCount * 15,
+    scenePlan.targetSceneCount * 15,
     Math.round(profile.maxDurationSeconds * 2.4)
   );
-  const targetWordsPerScene = Math.max(8, Math.round(targetWordsTotal / profile.sceneCount));
+  const targetWordsPerScene = Math.max(8, Math.round(targetWordsTotal / scenePlan.targetSceneCount));
 
   const promptLines = [
     'Return JSON only that matches the provided schema.',
-    `Your main task is to invent a specific, compelling video topic within the category of "${topic}", then write the script for it.`,
-    'Do not write a generic script about the category itself. Invent a specific title and topic.',
-    `Use exactly ${profile.sceneCount} scenes.`,
-    `Target a total runtime of ${profile.maxDurationSeconds} seconds.`,
+    `Write the script about the exact topic "${topic}".`,
+    'Do not replace the topic with an unrelated example or an invented internal placeholder.',
+    `Use between ${scenePlan.minSceneCount} and ${scenePlan.maxSceneCount} scenes.`,
+    `Aim for about ${scenePlan.targetSceneCount} scenes unless the story clearly needs one more or one less.`,
+    `Keep the total runtime at or below ${profile.maxDurationSeconds} seconds.`,
     `Aim for roughly ${targetWordsTotal} spoken words total, or about ${targetWordsPerScene} words per scene, written for a narrator reading aloud.`,
     'Use short, spoken sentences instead of dense paragraphs.',
+    'Use simple everyday English. Choose plain words over polished business language.',
+    'Write like a clear human narrator, not a consultant, marketer, or corporate blog post.',
     'Use a hook, problem, demonstration, and payoff structure across the scenes.',
     'Write for people searching for a practical answer, comparison, or tutorial.',
     'If the topic is a product or platform, compare it against the obvious manual workflow or alternative.',
     'Avoid generic filler language and keep every scene concrete.',
     'Include at least one practical example or comparison in the middle scenes.',
     'For finance, SaaS, or SEO topics, name one specific scenario, metric, account type, workflow step, or screen the viewer would actually inspect.',
+    'Make the opening feel worth stopping for on Meta: lead with stakes, surprise, or a clean unresolved question.',
+    'Each new scene should add a fresh detail, contrast, or consequence. No scene should feel interchangeable.',
+    'Do not use lazy filler lines like "this matters because" unless you immediately explain a concrete consequence.',
+    'Avoid jargon like landscape, leverage, ecosystem, transformation, unlock, optimize, or synergy.',
+    'Avoid robotic transitions like moreover, furthermore, additionally, and it is important to note.',
     ...CONCRETE_SCENE_RULES,
     'Each scene must include text, visualQuery, and durationSeconds.',
     'Keep each scene at least 3 seconds long.',
@@ -463,9 +747,7 @@ function buildGenerationPrompt(
     `Tone: ${profile.tone}.`,
     `Visual style: ${profile.visualStyle}.`,
     `Prompt directives: ${profile.promptDirectives}.`,
-    `Preferred topics: ${joinOrNone(profile.preferredTopics)}.`,
-    `Banned topics: ${joinOrNone(profile.bannedTopics)}.`,
-    `Banned terms: ${joinOrNone(profile.bannedTerms)}.`,
+    `Content categories: ${joinOrNone(profile.contentCategories.map((category) => category.label))}.`,
     'Each tag must be a short keyword or short phrase, not a sentence.',
     'Keep every tag under 50 characters and avoid punctuation.',
     `CTA style: ${profile.callToActionStyle}.`,
@@ -483,14 +765,59 @@ function buildGenerationPrompt(
     'Place the strongest call to action near the final scene only.',
   ];
 
+  if (contentBrief) {
+    promptLines.push(
+      `Canonical angle: ${contentBrief.angle}.`,
+      `Chosen category: ${contentBrief.category?.label ?? 'none'}.`,
+      `Content type: ${contentBrief.contentType}.`,
+      `Verification status: ${contentBrief.verificationStatus}.`,
+      `Evidence source count: ${contentBrief.evidence.items.length}.`,
+      `Monetization score: ${contentBrief.monetizationScore?.total ?? 'unknown'}.`,
+      `Country targets: ${joinOrNone(contentBrief.category?.countryTargets ?? [])}.`,
+      `Key entities: ${joinOrNone(contentBrief.keyEntities)}.`,
+      `Desired visuals: ${joinOrNone(contentBrief.desiredVisuals)}.`,
+      `Allowed sources: ${joinOrNone(contentBrief.allowedSources)}.`,
+      `Tone guidance: ${joinOrNone(contentBrief.toneGuidance)}.`
+    );
+
+    if (contentBrief.storyAngle) {
+      promptLines.push(
+        `Core hook: ${contentBrief.storyAngle.coreHook}.`,
+        `Curiosity gap: ${contentBrief.storyAngle.curiosityGap}.`,
+        `High-stakes angle: ${contentBrief.storyAngle.highStakesAngle}.`,
+        `Concrete implication: ${contentBrief.storyAngle.concreteImplication}.`,
+        `Twist or payoff: ${contentBrief.storyAngle.twistOrPayoff}.`,
+        `Visual moments: ${joinOrNone(contentBrief.storyAngle.visualMoments)}.`,
+        `Hook style: ${contentBrief.storyAngle.hookStyle}.`
+      );
+    }
+
+    if (contentBrief.factualClaims.length > 0) {
+      promptLines.push(`Supported factual claims: ${contentBrief.factualClaims.join(' || ')}.`);
+    }
+
+    if (contentBrief.evidence.items.length > 0) {
+      promptLines.push(
+        'Use the evidence list below to anchor the script. Do not invent facts beyond it.',
+        ...contentBrief.evidence.items
+          .slice(0, 5)
+          .map(
+            (item, index) =>
+              `Evidence ${index + 1}: ${item.title} | ${item.sourceName ?? 'unknown source'} | ${
+                item.publishedAt ?? 'unknown date'
+              } | ${item.snippet ?? 'no snippet'}`
+          )
+      );
+    }
+  }
+
   if (profile.topicSource === 'daily_news') {
     promptLines.push(
       'Treat this as a current news explainer, not a timeless tutorial.',
       'Keep every factual claim anchored to the supplied news context. Do not invent details, motives, numbers, or quotes.',
       'Explain what happened, why people care, and what changes next in plain language.',
-      'One host should mainly explain the story while the other host reacts, asks clarifying questions, and pushes for simpler language.',
-      'Humanize the dialogue with occasional natural speech markers like "mm", "you know", "look", or "I mean", but use them sparingly and not in every turn.',
-      'Allow one or two light opinion beats or gentle jokes, but keep them clearly framed as reactions, not facts.',
+      'Humanize the narration with occasional natural spoken phrasing, but keep it restrained and clear.',
+      'Allow one or two light opinion beats or gentle jokes, but keep them clearly framed as commentary, not facts.',
       'If part of the story is uncertain, say it is unclear instead of pretending certainty.',
       'Focus on the latest angle and avoid stale background unless it helps simplify the story.'
     );
@@ -514,28 +841,36 @@ function buildRepairPrompt(
   profile: ContentProfile,
   topic: string,
   repairContext: RepairContext,
-  newsContext: NewsTopicContext | null
+  newsContext: NewsTopicContext | null,
+  contentBrief: ContentBrief | null
 ): string {
+  const scenePlan = deriveScenePlan(profile.maxDurationSeconds);
   const targetWordsTotal = Math.max(
-    profile.sceneCount * 15,
+    scenePlan.targetSceneCount * 15,
     Math.round(profile.maxDurationSeconds * 2.4)
   );
-  const targetWordsPerScene = Math.max(8, Math.round(targetWordsTotal / profile.sceneCount));
+  const targetWordsPerScene = Math.max(8, Math.round(targetWordsTotal / scenePlan.targetSceneCount));
 
   const promptLines = [
     'The previous response failed validation.',
     'Repair it so it satisfies the exact same JSON schema and constraints.',
     'Do not add commentary or markdown fences. Return JSON only.',
-    `Category: ${topic}.`,
-    `Required scene count: ${profile.sceneCount}.`,
+    `Topic: ${topic}.`,
+    `Allowed scene count: ${scenePlan.minSceneCount} to ${scenePlan.maxSceneCount}.`,
+    `Target scene count: about ${scenePlan.targetSceneCount}.`,
     `Target total duration: ${profile.maxDurationSeconds} seconds.`,
     `Target roughly ${targetWordsTotal} spoken words total, or about ${targetWordsPerScene} words per scene.`,
     'Use a hook, problem, demonstration, and payoff structure across the scenes.',
     'Write for people searching for a practical answer, comparison, or tutorial.',
+    'Use simple, spoken English and avoid polished jargon.',
     'If the topic is a product or platform, compare it against the obvious manual workflow or alternative.',
     'Avoid generic filler language and keep every scene concrete.',
     'Include at least one practical example or comparison in the middle scenes.',
     'For finance, SaaS, or SEO topics, name one specific scenario, metric, account type, workflow step, or screen the viewer would actually inspect.',
+    'Make the opening feel worth stopping for immediately.',
+    'Escalate scene by scene instead of rephrasing the same idea.',
+    'Avoid words like leverage, ecosystem, transformation, unlock, optimize, and synergy.',
+    'Avoid robotic transitions like moreover, furthermore, additionally, and it is important to note.',
     ...CONCRETE_SCENE_RULES,
     'If the topic touches finance, keep it tool-led or comparison-led and avoid advice or promises.',
     'Each tag must be a short keyword or short phrase, not a sentence.',
@@ -546,11 +881,43 @@ function buildRepairPrompt(
     repairContext.rawResponse,
   ];
 
+  if (contentBrief) {
+    promptLines.push(
+      `Canonical angle: ${contentBrief.angle}.`,
+      `Chosen category: ${contentBrief.category?.label ?? 'none'}.`,
+      `Verification status: ${contentBrief.verificationStatus}.`,
+      `Evidence source count: ${contentBrief.evidence.items.length}.`,
+      `Tone guidance: ${joinOrNone(contentBrief.toneGuidance)}.`
+    );
+
+    if (contentBrief.storyAngle) {
+      promptLines.push(
+        `Core hook: ${contentBrief.storyAngle.coreHook}.`,
+        `Curiosity gap: ${contentBrief.storyAngle.curiosityGap}.`,
+        `Concrete implication: ${contentBrief.storyAngle.concreteImplication}.`,
+        `Twist or payoff: ${contentBrief.storyAngle.twistOrPayoff}.`
+      );
+    }
+
+    if (contentBrief.evidence.items.length > 0) {
+      promptLines.push(
+        ...contentBrief.evidence.items
+          .slice(0, 5)
+          .map(
+            (item, index) =>
+              `Evidence ${index + 1}: ${item.title} | ${item.sourceName ?? 'unknown source'} | ${
+                item.publishedAt ?? 'unknown date'
+              } | ${item.snippet ?? 'no snippet'}`
+          )
+      );
+    }
+  }
+
   if (profile.topicSource === 'daily_news') {
     promptLines.push(
       'Keep the script grounded in the supplied current news context.',
       'Do not invent facts, timelines, quotes, or company motives.',
-      'Make the dialogue feel natural with restrained conversational markers and reactive questions.'
+      'Make the narration feel natural with restrained conversational phrasing.'
     );
   }
 
@@ -584,7 +951,59 @@ async function resolveNewsContext(
   }
 }
 
+async function resolveResearchContext(
+  contentOrchestrator: ContentOrchestrator | undefined,
+  newsProvider: NewsProvider | undefined,
+  profile: ContentProfile,
+  topic: string
+): Promise<ResearchContext> {
+  const newsContext = await resolveNewsContext(newsProvider, profile, topic);
+
+  if (!contentOrchestrator) {
+    return {
+      newsContext,
+      contentBrief: null,
+    };
+  }
+
+  try {
+    return {
+      newsContext,
+      contentBrief: await contentOrchestrator.buildBrief(profile, topic),
+    };
+  } catch {
+    return {
+      newsContext,
+      contentBrief: null,
+    };
+  }
+}
+
+function assertResearchSufficiency(topic: string, contentBrief: ContentBrief | null): void {
+  if (!contentBrief) {
+    return;
+  }
+
+  if (contentBrief.exactEvidenceRequired && contentBrief.evidence.items.length === 0) {
+    throw new Error(
+      `No trusted evidence was available for "${topic}". Configure Tavily/Cohere or choose a better-supported topic.`
+    );
+  }
+
+  if (
+    contentBrief.exactEvidenceRequired &&
+    contentBrief.verificationStatus === 'degraded' &&
+    contentBrief.searchProvider !== 'news' &&
+    contentBrief.evidence.items.length < 2
+  ) {
+    throw new Error(
+      `Evidence for "${topic}" is too weak to publish safely. Retry after search providers are configured.`
+    );
+  }
+}
+
 function buildScriptResponseJsonSchema(profile: ContentProfile): Record<string, unknown> {
+  const scenePlan = deriveScenePlan(profile.maxDurationSeconds);
   const schema: Record<string, unknown> = {
     type: 'object',
     additionalProperties: false,
@@ -604,8 +1023,8 @@ function buildScriptResponseJsonSchema(profile: ContentProfile): Record<string, 
       },
       scenes: {
         type: 'array',
-        minItems: profile.sceneCount,
-        maxItems: profile.sceneCount,
+        minItems: scenePlan.minSceneCount,
+        maxItems: scenePlan.maxSceneCount,
         items: {
           type: 'object',
           additionalProperties: false,
@@ -626,7 +1045,7 @@ function buildScriptResponseJsonSchema(profile: ContentProfile): Record<string, 
       },
       totalDurationSeconds: {
         type: 'number',
-        minimum: profile.sceneCount * 3,
+        minimum: scenePlan.minSceneCount * 3,
         maximum: profile.maxDurationSeconds,
       },
     },
@@ -651,7 +1070,12 @@ function readGeminiResponseText(response: GeminiTextResponse): string {
   return text;
 }
 
-function parseGeminiScript(rawText: string, profile: ContentProfile, topic: string): ScriptPackage {
+function parseGeminiScript(
+  rawText: string,
+  profile: ContentProfile,
+  topic: string,
+  contentBrief: ContentBrief | null
+): ScriptPackage {
   let payload: unknown;
 
   try {
@@ -661,7 +1085,7 @@ function parseGeminiScript(rawText: string, profile: ContentProfile, topic: stri
   }
 
   try {
-    const normalizedScript = normalizeScriptDraft(payload, profile, topic);
+    const normalizedScript = normalizeScriptDraft(payload, profile, topic, contentBrief);
     return ScriptPackageSchema.parse(normalizedScript);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Gemini returned invalid script data.';
@@ -672,7 +1096,8 @@ function parseGeminiScript(rawText: string, profile: ContentProfile, topic: stri
 function normalizeScriptDraft(
   payload: unknown,
   profile: ContentProfile,
-  topic: string
+  topic: string,
+  contentBrief: ContentBrief | null
 ): ScriptPackage {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Gemini response must be a JSON object.');
@@ -680,19 +1105,30 @@ function normalizeScriptDraft(
 
   const record = payload as Record<string, unknown>;
   const scenesInput = Array.isArray(record.scenes) ? record.scenes : null;
+  const scenePlan = deriveScenePlan(profile.maxDurationSeconds);
 
   if (!scenesInput) {
     throw new Error('Gemini response must include a scenes array.');
   }
 
-  if (scenesInput.length !== profile.sceneCount) {
-    throw new Error(`Gemini must return exactly ${profile.sceneCount} scenes.`);
+  if (
+    scenesInput.length < scenePlan.minSceneCount ||
+    scenesInput.length > scenePlan.maxSceneCount
+  ) {
+    throw new Error(
+      `Gemini must return between ${scenePlan.minSceneCount} and ${scenePlan.maxSceneCount} scenes.`
+    );
   }
 
   const scenes = scenesInput.map((scene, index) => normalizeSceneDraft(scene, index));
+  const resolvedTargetDurationSeconds = resolveTargetDurationSeconds(
+    scenes.map((scene) => scene.text),
+    profile.maxDurationSeconds,
+    typeof record.totalDurationSeconds === 'number' ? record.totalDurationSeconds : null
+  );
   const durationTargets = allocateDurations(
     scenes.map((scene) => scene.durationSeconds),
-    profile.maxDurationSeconds
+    resolvedTargetDurationSeconds
   );
 
   const scriptPackage = {
@@ -710,12 +1146,12 @@ function normalizeScriptDraft(
       durationSeconds: durationTargets[index] ?? MIN_SCENE_DURATION_SECONDS,
       visualMode: 'auto' as const,
     })),
-    totalDurationSeconds: profile.maxDurationSeconds,
+    totalDurationSeconds: resolvedTargetDurationSeconds,
     dialogue: null,
   };
 
   const normalizedScriptPackage = applySceneVisualModes(profile, scriptPackage);
-  validateScriptDirectionQuality(normalizedScriptPackage);
+  validateScriptDirectionQuality(normalizedScriptPackage, contentBrief);
   validateScriptTiming(normalizedScriptPackage, profile);
   return normalizedScriptPackage;
 }
@@ -758,9 +1194,11 @@ function normalizeTags(input: unknown, profile: ContentProfile, topic: string): 
 function buildLocalSceneIdeas(
   profile: ContentProfile,
   topic: string,
-  newsContext: NewsTopicContext | null
+  newsContext: NewsTopicContext | null,
+  sceneCount: number
 ): string[] {
-  const nextTopic = profile.preferredTopics[0] ?? 'AI tools that save time';
+  const nextTopic =
+    profile.contentCategories[0]?.exampleTopics[0] ?? 'the next business or tech story worth watching';
   const topicKey = topic.toLowerCase();
 
   if (profile.topicSource === 'daily_news' && newsContext) {
@@ -770,11 +1208,11 @@ function buildLocalSceneIdeas(
       'The next beat simplifies what actually changed and avoids jargon so the viewer understands the headline fast.',
       'Now compare this update with the old normal or expectation so the shift feels concrete instead of abstract.',
       'Spell out who is affected, what people are watching next, and which part is still unclear.',
-      'Let one host add a small reaction or joke without changing the facts, then pull the conversation back to what matters.',
+      'Add one small grounded reaction or joke without changing the facts, then pull the explanation back to what matters.',
       `${profile.callToActionTemplate}`,
       `If you want tomorrow's simplified headline, come back for the next story.`,
       'Save this if you want the quick version without digging through ten articles.',
-    ].slice(0, profile.sceneCount);
+    ].slice(0, sceneCount);
   }
 
   if (/retirement/.test(topicKey)) {
@@ -787,7 +1225,7 @@ function buildLocalSceneIdeas(
       `${profile.callToActionTemplate}`,
       `If you want the next practical topic, try ${nextTopic}.`,
       'Save this checklist and use it before you pick the next retirement tool.',
-    ].slice(0, profile.sceneCount);
+    ].slice(0, sceneCount);
   }
 
   if (/real estate/.test(topicKey)) {
@@ -800,7 +1238,7 @@ function buildLocalSceneIdeas(
       `${profile.callToActionTemplate}`,
       `If you want the next practical topic, try ${nextTopic}.`,
       'Save this process and use it the next time a deal looks better than it really is.',
-    ].slice(0, profile.sceneCount);
+    ].slice(0, sceneCount);
   }
 
   if (/seo|programmatic/.test(topicKey)) {
@@ -813,7 +1251,7 @@ function buildLocalSceneIdeas(
       `${profile.callToActionTemplate}`,
       `If you want the next practical topic, try ${nextTopic}.`,
       'Save this breakdown and use it before you scale another batch of pages.',
-    ].slice(0, profile.sceneCount);
+    ].slice(0, sceneCount);
   }
 
   if (/crm|saas|workflow|automation/.test(topicKey)) {
@@ -826,7 +1264,7 @@ function buildLocalSceneIdeas(
       `${profile.callToActionTemplate}`,
       `If you want the next practical topic, try ${nextTopic}.`,
       'Save this workflow and use it the next time a tool promises more than it proves.',
-    ].slice(0, profile.sceneCount);
+    ].slice(0, sceneCount);
   }
 
   return [
@@ -838,7 +1276,7 @@ function buildLocalSceneIdeas(
     `${profile.callToActionTemplate}`,
     `If you want the next practical topic, try ${nextTopic}.`,
     `Save this workflow and use it the next time you need a simpler path.`,
-  ].slice(0, profile.sceneCount);
+  ].slice(0, sceneCount);
 }
 
 function getRequiredString(input: unknown, message: string): string {
@@ -906,11 +1344,37 @@ function allocateDurations(weights: number[], targetTotal: number): number[] {
   return allocations.map((item) => MIN_SCENE_DURATION_SECONDS + item.value);
 }
 
+function resolveTargetDurationSeconds(
+  sceneTexts: string[],
+  maxDurationSeconds: number,
+  requestedTotalDurationSeconds: number | null = null
+): number {
+  const minimumDurationSeconds = Math.max(1, sceneTexts.length) * MIN_SCENE_DURATION_SECONDS;
+  const estimatedNarrationSeconds = estimateNarrationDurationSeconds(sceneTexts);
+  const naturalDurationSeconds = Math.max(
+    minimumDurationSeconds,
+    Math.ceil(estimatedNarrationSeconds + 2)
+  );
+  const requestedDurationSeconds =
+    typeof requestedTotalDurationSeconds === 'number' && Number.isFinite(requestedTotalDurationSeconds)
+      ? Math.max(minimumDurationSeconds, Math.round(requestedTotalDurationSeconds))
+      : null;
+
+  return Math.min(
+    maxDurationSeconds,
+    requestedDurationSeconds ? Math.min(requestedDurationSeconds, naturalDurationSeconds) : naturalDurationSeconds
+  );
+}
+
 function validateScriptTiming(scriptPackage: ScriptPackage, profile: ContentProfile): void {
   const estimatedNarrationSeconds = estimateNarrationDurationSeconds(
     scriptPackage.scenes.map((scene) => scene.text)
   );
   const budgetAllowanceSeconds = getNarrationOvershootAllowanceSeconds(profile.maxDurationSeconds);
+  const minimumNarrationSeconds = Math.max(
+    scriptPackage.scenes.length * 2.5,
+    Math.round(scriptPackage.totalDurationSeconds * 0.65)
+  );
 
   if (estimatedNarrationSeconds > profile.maxDurationSeconds + budgetAllowanceSeconds) {
     throw new Error(
@@ -919,9 +1383,20 @@ function validateScriptTiming(scriptPackage: ScriptPackage, profile: ContentProf
       )} seconds. Regenerate the script.`
     );
   }
+
+  if (estimatedNarrationSeconds < minimumNarrationSeconds) {
+    throw new Error(
+      `Script underfills the runtime budget by ${Math.ceil(
+        minimumNarrationSeconds - estimatedNarrationSeconds
+      )} seconds. Regenerate the script with fuller but still concrete narration.`
+    );
+  }
 }
 
-function validateScriptDirectionQuality(scriptPackage: ScriptPackage): void {
+function validateScriptDirectionQuality(
+  scriptPackage: ScriptPackage,
+  contentBrief: ContentBrief | null
+): void {
   const lowerSceneTexts = scriptPackage.scenes.map((scene) => scene.text.toLowerCase());
   if (new Set(lowerSceneTexts).size <= Math.max(2, Math.floor(scriptPackage.scenes.length * 0.6))) {
     throw new Error('Script repeats too much and lacks scene-to-scene progression.');
@@ -931,6 +1406,23 @@ function validateScriptDirectionQuality(scriptPackage: ScriptPackage): void {
     if (GENERIC_FILLER_PATTERNS.some((pattern) => pattern.test(scene.text))) {
       throw new Error('Script contains generic filler language and must be more concrete.');
     }
+    if (JARGON_HEAVY_PATTERN.test(scene.text)) {
+      throw new Error('Script uses jargon-heavy language and must be rewritten in simpler English.');
+    }
+    if (ROBOTIC_TRANSITION_PATTERN.test(scene.text)) {
+      throw new Error('Script sounds robotic and must use more natural spoken phrasing.');
+    }
+    if (INTERNAL_FALLBACK_PATTERN.test(scene.text) || INTERNAL_FALLBACK_PATTERN.test(scene.visualQuery)) {
+      throw new Error('Script contains internal fallback placeholder language and must be regenerated.');
+    }
+    if (GENERIC_ANY_TOPIC_PATTERN.test(scene.text)) {
+      throw new Error('Script sounds interchangeable and must be rewritten with sharper detail.');
+    }
+  }
+
+  const openingScene = scriptPackage.scenes[0];
+  if (openingScene && BORING_SCENE_OPENING_PATTERN.test(openingScene.text)) {
+    throw new Error('Opening scene is too generic and needs a stronger hook.');
   }
 
   const nonFinalScenes = scriptPackage.scenes.slice(1, Math.max(2, scriptPackage.scenes.length - 1));
@@ -938,6 +1430,65 @@ function validateScriptDirectionQuality(scriptPackage: ScriptPackage): void {
   if (!hasConcreteDemo) {
     throw new Error('Script must include at least one practical comparison or concrete example.');
   }
+
+  if (contentBrief?.storyAngle) {
+    const fullText = scriptPackage.scenes.map((scene) => scene.text).join(' ');
+    const hookTokens = contentBrief.storyAngle.coreHook
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length > 4);
+    const matchedHookTokens = hookTokens.filter((token) => fullText.toLowerCase().includes(token));
+    if (matchedHookTokens.length === 0) {
+      throw new Error('Script ignored the planned story angle and needs a sharper editorial pass.');
+    }
+  }
+
+  if (contentBrief?.exactEvidenceRequired) {
+    const hasAnchoredScene = scriptPackage.scenes.some((scene) =>
+      contentBrief.keyEntities.some((entity) => scene.text.toLowerCase().includes(entity.toLowerCase())) ||
+      contentBrief.evidence.items.some((item) =>
+        item.title
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((token) => token.length > 4)
+          .some((token) => scene.text.toLowerCase().includes(token))
+      )
+    );
+
+    if (!hasAnchoredScene) {
+      throw new Error('Factual script is not anchored strongly enough to real evidence.');
+    }
+
+    for (const scene of scriptPackage.scenes) {
+      if (FACTUAL_PLACEHOLDER_VISUAL_PATTERN.test(scene.visualQuery)) {
+        throw new Error('Factual script requested a fake or generic visual instead of an exact visual target.');
+      }
+    }
+  }
+}
+
+function deriveScenePlan(maxDurationSeconds: number): ScenePlan {
+  if (maxDurationSeconds <= 45) {
+    return { minSceneCount: 3, targetSceneCount: 3, maxSceneCount: 4 };
+  }
+
+  if (maxDurationSeconds <= 75) {
+    return { minSceneCount: 3, targetSceneCount: 4, maxSceneCount: 5 };
+  }
+
+  if (maxDurationSeconds <= 105) {
+    return { minSceneCount: 4, targetSceneCount: 5, maxSceneCount: 6 };
+  }
+
+  if (maxDurationSeconds <= 135) {
+    return { minSceneCount: 5, targetSceneCount: 6, maxSceneCount: 7 };
+  }
+
+  if (maxDurationSeconds <= 165) {
+    return { minSceneCount: 6, targetSceneCount: 7, maxSceneCount: 8 };
+  }
+
+  return { minSceneCount: 6, targetSceneCount: 8, maxSceneCount: 8 };
 }
 
 function hasConcreteSceneSignal(text: string): boolean {
@@ -1078,6 +1629,44 @@ async function createGroqClient(apiKey: string, timeoutMs: number): Promise<Groq
           }
 
           return (await response.json()) as GroqTextResponse;
+        },
+      },
+    },
+  };
+}
+
+async function createMistralClient(apiKey: string, timeoutMs: number): Promise<MistralClient> {
+  return {
+    chat: {
+      completions: {
+        create: async (input) => {
+          let response: Response;
+          try {
+            response = await fetch(MISTRAL_CHAT_COMPLETIONS_ENDPOINT, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(input),
+              signal: AbortSignal.timeout(timeoutMs),
+            });
+          } catch (error) {
+            if (isAbortError(error)) {
+              throw new Error(`Mistral request timed out after ${timeoutMs}ms.`);
+            }
+
+            throw error;
+          }
+
+          if (!response.ok) {
+            const body = await response.text().catch(() => '');
+            throw new Error(
+              `Mistral request failed with status ${response.status}.${body ? ` ${body}` : ''}`
+            );
+          }
+
+          return (await response.json()) as MistralTextResponse;
         },
       },
     },

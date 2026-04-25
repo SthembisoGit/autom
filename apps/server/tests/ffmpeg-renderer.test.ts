@@ -165,6 +165,8 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
           rightsSummary: 'Scene clip for renderer tests.',
           attributionRequired: false,
           entityLabel: null,
+          matchQuality: null,
+          reuseStatus: null,
         },
         {
           kind: 'audio',
@@ -181,6 +183,8 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
           rightsSummary: null,
           attributionRequired: false,
           entityLabel: null,
+          matchQuality: null,
+          reuseStatus: null,
         },
       ],
       warnings: [],

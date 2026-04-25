@@ -31,6 +31,8 @@ export class SqliteDatabase {
         review_json TEXT,
         publication_json TEXT NOT NULL DEFAULT '[]',
         error_message TEXT,
+        archived_at TEXT,
+        archived_reason TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -83,6 +85,8 @@ export class SqliteDatabase {
 
     this.ensureColumn('jobs', 'script_metadata_json', 'TEXT');
     this.ensureColumn('jobs', 'manual_clip_json', 'TEXT');
+    this.ensureColumn('jobs', 'archived_at', 'TEXT');
+    this.ensureColumn('jobs', 'archived_reason', 'TEXT');
   }
 
   close(): void {

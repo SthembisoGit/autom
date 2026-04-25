@@ -128,6 +128,13 @@ function buildTranscriptReference(path: string, model: string): AssetReference {
     externalId: null,
     sceneOrder: null,
     query: null,
+    retrievalOrigin: 'research',
+    licenseLabel: null,
+    rightsSummary: null,
+    attributionRequired: false,
+    entityLabel: null,
+    matchQuality: null,
+    reuseStatus: null,
   };
 }
 

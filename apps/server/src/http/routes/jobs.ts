@@ -53,6 +53,26 @@ export async function registerJobRoutes(
     }
   });
 
+  app.post('/jobs/:jobId/cancel', async (request, reply) => {
+    const params = request.params as { jobId: string };
+
+    try {
+      return services.jobsService.cancel(params.jobId);
+    } catch (error) {
+      return sendServiceError(reply, error, 'Unable to cancel job.');
+    }
+  });
+
+  app.post('/jobs/:jobId/archive', async (request, reply) => {
+    const params = request.params as { jobId: string };
+
+    try {
+      return services.jobsService.archive(params.jobId);
+    } catch (error) {
+      return sendServiceError(reply, error, 'Unable to archive job.');
+    }
+  });
+
   app.get('/jobs/:jobId/artifacts/render/:artifact', async (request, reply) => {
     const params = request.params as { jobId: string; artifact: string };
     const artifact = parseRenderArtifact(params.artifact);

@@ -15,7 +15,7 @@ export async function registerProfileRoutes(
       'tone',
       'visualStyle',
       'promptDirectives',
-      'sceneCount',
+      'contentCategories',
       'maxDurationSeconds',
       'contentMode',
       'callToActionStyle',
@@ -26,9 +26,6 @@ export async function registerProfileRoutes(
       'defaultVoice',
     ],
     optional: [
-      'preferredTopics',
-      'bannedTopics',
-      'bannedTerms',
       'defaultHashtags',
       'topicSource',
       'affiliateLinkTemplate',

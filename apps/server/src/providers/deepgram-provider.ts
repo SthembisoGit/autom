@@ -42,6 +42,13 @@ export class LocalVoiceProvider implements VoiceProvider {
       externalId: null,
       sceneOrder: null,
       query: null,
+      retrievalOrigin: 'research',
+      licenseLabel: null,
+      rightsSummary: null,
+      attributionRequired: false,
+      entityLabel: null,
+      matchQuality: null,
+      reuseStatus: null,
     };
 
     return {
@@ -269,6 +276,13 @@ function buildNarrationAssetReference(
     externalId: null,
     sceneOrder: null,
     query: null,
+    retrievalOrigin: 'research',
+    licenseLabel: null,
+    rightsSummary: null,
+    attributionRequired: false,
+    entityLabel: null,
+    matchQuality: null,
+    reuseStatus: null,
   };
 }
 

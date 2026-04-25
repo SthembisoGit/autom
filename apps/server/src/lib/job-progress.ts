@@ -136,6 +136,35 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
     });
   }
 
+  if (job.status === 'cancelled') {
+    return JobProgressSchema.parse({
+      stage: 'cancelled',
+      title: 'Run cancelled',
+      detail:
+        failureMessage ??
+        latestAudit?.message ??
+        'The run was cancelled from the ops console before it finished.',
+      tone: 'warning',
+      isTerminal: true,
+      retryable: false,
+      updatedAt: job.updatedAt,
+    });
+  }
+
+  if (job.status === 'cancelling') {
+    return JobProgressSchema.parse({
+      stage: 'cancelling',
+      title: 'Cancelling run',
+      detail:
+        latestAudit?.message ??
+        'The run is finishing its current safe step before it stops.',
+      tone: 'warning',
+      isTerminal: false,
+      retryable: false,
+      updatedAt: latestAudit?.createdAt ?? job.updatedAt,
+    });
+  }
+
   if (job.status === 'published') {
     const publishedResult =
       job.publicationResults.find((result) => result.status === 'published') ?? null;

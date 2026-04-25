@@ -1,5 +1,6 @@
 import type { ContentProfile } from '@autom/contracts';
 
+import { buildCategoryQueries } from '../lib/content-strategy.js';
 import type { NewsProvider, NewsTopicContext } from '../lib/types.js';
 
 const GOOGLE_NEWS_SEARCH_BASE_URL = 'https://news.google.com/rss/search';
@@ -28,15 +29,11 @@ export class GoogleNewsRssProvider implements NewsProvider {
       queries.map(async (query) => await this.fetchQueryItems(query))
     );
 
-    const candidates = dedupeNewsItems(
-      batches.flat().filter((item) => !topicViolatesPolicy(profile, item.title))
-    ).sort(compareNewsItems);
+    const candidates = dedupeNewsItems(batches.flat()).sort(compareNewsItems);
 
     if (candidates.length === 0) {
       const topStories = await this.fetchTopStories();
-      const filtered = dedupeNewsItems(
-        topStories.filter((item) => !topicViolatesPolicy(profile, item.title))
-      ).sort(compareNewsItems);
+      const filtered = dedupeNewsItems(topStories).sort(compareNewsItems);
       if (filtered.length === 0) {
         return null;
       }
@@ -51,16 +48,13 @@ export class GoogleNewsRssProvider implements NewsProvider {
 
   async resolveContext(profile: ContentProfile, topic: string): Promise<NewsTopicContext | null> {
     const matches = await this.fetchQueryItems(topic);
-    const filtered = dedupeNewsItems(
-      matches.filter((item) => !topicViolatesPolicy(profile, item.title))
-    ).sort(compareNewsItems);
+    const filtered = dedupeNewsItems(matches).sort(compareNewsItems);
 
     return filtered[0] ?? null;
   }
 
   private resolveQueries(profile: ContentProfile): string[] {
-    const topics = profile.preferredTopics.length > 0 ? profile.preferredTopics : [profile.niche];
-    return topics.slice(0, MAX_NEWS_QUERY_COUNT);
+    return buildCategoryQueries(profile, MAX_NEWS_QUERY_COUNT);
   }
 
   private async fetchQueryItems(query: string): Promise<NewsTopicContext[]> {
@@ -193,14 +187,6 @@ function normalizePublishedAt(value: string | null): string | null {
 
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString();
-}
-
-function topicViolatesPolicy(profile: ContentProfile, topic: string): boolean {
-  const normalizedTopic = topic.toLowerCase();
-  return (
-    profile.bannedTopics.some((candidate) => normalizedTopic.includes(candidate.toLowerCase())) ||
-    profile.bannedTerms.some((candidate) => normalizedTopic.includes(candidate.toLowerCase()))
-  );
 }
 
 function dedupeNewsItems(items: NewsTopicContext[]): NewsTopicContext[] {

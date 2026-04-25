@@ -27,11 +27,7 @@ import { TikTokPublisher } from '../publishers/tiktok.js';
 import { YoutubePublisher } from '../publishers/youtube.js';
 import { AppRepository } from '../repositories/app-repository.js';
 import { SqliteDatabase } from '../repositories/sqlite.js';
-import {
-  createDefaultProfile,
-  isLegacyDefaultProfile,
-  migrateLegacyDefaultProfile,
-} from './default-profile.js';
+import { createDefaultProfile } from './default-profile.js';
 import { ensureRuntimePaths, resolveDatabasePath } from './runtime.js';
 import type {
   MediaRenderer,
@@ -64,16 +60,10 @@ export async function bootstrap(options?: BootstrapOptions) {
   const repository = new AppRepository(database);
   const services = createServices(env, runtimePaths, repository, options);
 
-  if (services.profilesService.list().length === 0) {
+  if (repository.listProfiles().length === 0) {
     repository.upsertProfile(createDefaultProfile(['local']));
-  } else {
-    const defaultProfile = repository.getProfile('profile_default');
-    if (defaultProfile && isLegacyDefaultProfile(defaultProfile)) {
-      repository.upsertProfile(
-        migrateLegacyDefaultProfile(defaultProfile, defaultProfile.targetPlatforms)
-      );
-    }
   }
+  services.profilesService.ensureSeedProfile();
 
   const recoveredJobCount = await recoverInterruptedJobs(
     runtimePaths,
@@ -200,7 +190,7 @@ async function recoverInterruptedJobs(
     .listJobs()
     .filter(
       (job) =>
-        job.status === 'publish_pending' || job.status === 'drafting'
+        job.status === 'publish_pending' || job.status === 'drafting' || job.status === 'cancelling'
     );
 
   if (interruptedJobs.length === 0) {
@@ -208,15 +198,22 @@ async function recoverInterruptedJobs(
   }
 
   for (const job of interruptedJobs) {
-    const message = job.status === 'drafting'
+    const message =
+      job.status === 'drafting'
         ? 'Draft job was interrupted by a server restart and was marked failed.'
-        : 'Publish job was interrupted by a server restart and was marked failed.';
+        : job.status === 'cancelling'
+          ? 'Job cancellation was interrupted by a server restart and the run was marked cancelled.'
+          : 'Publish job was interrupted by a server restart and was marked failed.';
 
     await cleanupJobArtifacts(runtimePaths, job.id);
-    auditService.error(job.id, message);
+    if (job.status === 'cancelling') {
+      auditService.info(job.id, message);
+    } else {
+      auditService.error(job.id, message);
+    }
     repository.updateJob({
       ...job,
-      status: 'failed',
+      status: job.status === 'cancelling' ? 'cancelled' : 'failed',
       errorMessage: message,
     });
   }

@@ -105,6 +105,21 @@ export class PublicationsService {
     const results: PublicationResult[] = [];
 
     for (const platform of targetsToAttempt) {
+      const latestJob = this.repository.getJob(jobId);
+      if (latestJob?.status === 'cancelling' || latestJob?.status === 'cancelled') {
+        this.auditService.info(
+          jobId,
+          'Cancellation completed. Further publication attempts were stopped.'
+        );
+        return this.repository.updateJob({
+          ...job,
+          status: 'cancelled',
+          errorMessage: 'Cancelled by operator.',
+          publicationResults: mergePublicationResults(job.publicationResults, results),
+          updatedAt: nowIso(),
+        });
+      }
+
       const publisher = this.publishers.get(platform);
       if (!publisher) {
         results.push({

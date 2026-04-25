@@ -2,7 +2,7 @@ import type { AppEnv, RuntimePaths } from '@autom/config';
 import type { CreateJobRequest, GenerationJob } from '@autom/contracts';
 
 import { cleanupJobArtifacts } from '../lib/artifacts.js';
-import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { conflict, notFound } from '../lib/errors.js';
 import type {
   MediaRenderer,
   ScriptProvider,
@@ -13,6 +13,13 @@ import type {
 import type { AppRepository } from '../repositories/app-repository.js';
 import type { AuditService } from './audit.js';
 import type { ProfilesService } from './profiles.js';
+
+class OperatorCancelledError extends Error {
+  constructor(message = 'Cancelled by operator.') {
+    super(message);
+    this.name = 'OperatorCancelledError';
+  }
+}
 
 export class WorkflowService {
   constructor(
@@ -34,11 +41,6 @@ export class WorkflowService {
       throw notFound(`Profile ${input.profileId} not found.`);
     }
 
-    const policyViolation = this.profilesService.topicViolatesPolicy(profile, input.topic);
-    if (policyViolation) {
-      throw badRequest(`Requested topic violates profile policy. ${policyViolation}`);
-    }
-
     const duplicateJob = this.repository.findActiveJob(profile.id, input.topic);
     if (duplicateJob) {
       throw conflict(`An active job already exists for "${input.topic}" as ${duplicateJob.id}.`);
@@ -52,6 +54,7 @@ export class WorkflowService {
     this.auditService.info(job.id, `Job created for topic "${input.topic}".`);
 
     try {
+      this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Script generation started.');
       const { scriptPackage, scriptMetadata } = await this.scriptProvider.generate(
         profile,
@@ -67,11 +70,18 @@ export class WorkflowService {
         job.id,
         `Script package created via ${scriptMetadata.provider} (${scriptMetadata.mode}) using prompt ${scriptMetadata.promptVersion}.`
       );
+      this.auditService.info(
+        job.id,
+        `Research stack: search=${scriptMetadata.searchProvider}, rerank=${scriptMetadata.rerankProvider}, evidence=${scriptMetadata.evidenceSourceCount}, verification=${scriptMetadata.verificationStatus}.`
+      );
       if (this.env.GEMINI_API_KEY && scriptMetadata.provider !== 'gemini') {
         this.auditService.warn(
           job.id,
           `Primary Gemini script generation fell back to ${scriptMetadata.provider}.`
         );
+      }
+      for (const warning of scriptMetadata.warnings) {
+        this.auditService.warn(job.id, warning);
       }
       if (scriptMetadata.repaired || scriptMetadata.attemptCount > 1) {
         this.auditService.warn(
@@ -82,6 +92,7 @@ export class WorkflowService {
         );
       }
 
+      this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Narration synthesis started.');
       const narrationResult = await this.voiceProvider.synthesize(
         scriptPackage,
@@ -99,6 +110,7 @@ export class WorkflowService {
         this.auditService.warn(job.id, warning);
       }
 
+      this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Subtitle timing transcription started.');
       const transcriptResult = await this.transcriptionProvider.transcribe({
         scriptPackage,
@@ -117,6 +129,7 @@ export class WorkflowService {
         this.auditService.warn(job.id, warning);
       }
 
+      this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Visual selection started.');
       const visualSelection = await this.visualProvider.select({
         scriptPackage,
@@ -128,7 +141,16 @@ export class WorkflowService {
       for (const warning of visualSelection.warnings) {
         this.auditService.warn(job.id, warning);
       }
+      const unresolvedFactualVisuals = visualSelection.warnings.filter((warning) =>
+        /could not find an exact factual visual match/i.test(warning)
+      );
+      if (unresolvedFactualVisuals.length > 0) {
+        throw new Error(
+          `Visual selection could not find exact factual media for ${unresolvedFactualVisuals.length} scene(s).`
+        );
+      }
 
+      this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Render assembly started.');
       const reviewPackage = await this.mediaRenderer.render({
         env: this.env,
@@ -157,6 +179,7 @@ export class WorkflowService {
         },
       });
       this.auditService.info(job.id, 'Review package rendered.');
+      this.assertNotCancelled(job.id);
 
       return this.repository.updateJob({
         ...workingJob,
@@ -166,6 +189,17 @@ export class WorkflowService {
         errorMessage: null,
       });
     } catch (error) {
+      if (error instanceof OperatorCancelledError) {
+        await cleanupJobArtifacts(this.runtimePaths, job.id);
+        this.auditService.info(job.id, 'Cancellation completed. Run marked as cancelled.');
+        return this.repository.updateJob({
+          ...workingJob,
+          status: 'cancelled',
+          manualClipBundle: null,
+          errorMessage: error.message,
+        });
+      }
+
       const message = error instanceof Error ? error.message : 'Unknown workflow error.';
       await cleanupJobArtifacts(this.runtimePaths, job.id);
       this.auditService.error(job.id, message);
@@ -175,6 +209,17 @@ export class WorkflowService {
         manualClipBundle: null,
         errorMessage: message,
       });
+    }
+  }
+
+  private assertNotCancelled(jobId: string): void {
+    const current = this.repository.getJob(jobId);
+    if (!current) {
+      throw new OperatorCancelledError();
+    }
+
+    if (current.status === 'cancelling' || current.status === 'cancelled') {
+      throw new OperatorCancelledError();
     }
   }
 }

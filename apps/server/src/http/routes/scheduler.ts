@@ -22,4 +22,14 @@ export async function registerSchedulerRoutes(
       return sendServiceError(reply, error, 'Unable to run scheduler tick.');
     }
   });
+
+  app.post('/scheduler/runs/:runId/cancel', async (request, reply) => {
+    const params = request.params as { runId: string };
+
+    try {
+      return services.schedulerService.cancelRun(params.runId);
+    } catch (error) {
+      return sendServiceError(reply, error, 'Unable to cancel scheduler run.');
+    }
+  });
 }
