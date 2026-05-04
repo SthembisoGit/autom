@@ -2,11 +2,11 @@ import type { AppEnv } from '@autom/config';
 import type { ContentProfile } from '@autom/contracts';
 
 import {
-  buildMonetizationScore,
-  buildStoryAngle,
   buildTopicSelectionSeed,
   chooseCategory,
-} from '../lib/content-strategy.js';
+} from '../domains/strategy/category-engine.js';
+import { buildMonetizationScore as buildCategoryMonetizationScore } from '../domains/strategy/monetization-planner.js';
+import { buildStoryAngle } from '../domains/editorial/story-angle-planner.js';
 import type {
   ContentBrief,
   EvidenceItem,
@@ -80,7 +80,7 @@ export class ContentOrchestrator {
     );
     const contentType = inferContentType(profile, topic, newsContext, keyEntities, category);
     const exactEvidenceRequired = isExactEvidenceRequired(contentType);
-    const monetizationScore = buildMonetizationScore(
+    const monetizationScore = buildCategoryMonetizationScore(
       category,
       newsContext,
       rerankResult.data.items.length,

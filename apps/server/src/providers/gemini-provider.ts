@@ -20,7 +20,10 @@ import type {
   ScriptGenerationResult,
   ScriptProvider,
 } from '../lib/types.js';
-import { type ContentOrchestrator, createContentOrchestrator } from './content-orchestrator.js';
+import {
+  type ContentOrchestrator,
+  createContentOrchestrator,
+} from '../domains/research/content-orchestrator.js';
 
 const LOCAL_PROMPT_VERSION = 'local-script-template-v1';
 const GEMINI_PROMPT_VERSION = 'gemini-script-v1';

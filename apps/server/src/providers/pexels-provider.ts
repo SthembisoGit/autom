@@ -21,8 +21,8 @@ import type {
   VisualScenePlan,
   VisualSceneProvider,
 } from '../lib/types.js';
-import { createContentOrchestrator } from './content-orchestrator.js';
-import { createNewsProvider } from './news-provider.js';
+import { createContentOrchestrator } from '../domains/research/content-orchestrator.js';
+import { createNewsProvider } from '../domains/research/news-provider.js';
 
 const PEXELS_SEARCH_ENDPOINT = 'https://api.pexels.com/videos/search';
 const PIXABAY_VIDEO_ENDPOINT = 'https://pixabay.com/api/videos/';

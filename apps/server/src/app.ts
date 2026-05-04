@@ -12,7 +12,7 @@ import type {
   VisualProvider,
   VoiceProvider,
 } from './lib/types.js';
-import type { CommandRunner } from './media/ffmpeg-renderer.js';
+import type { CommandRunner } from './domains/production/render/index.js';
 
 export async function createApp(options?: {
   env?: NodeJS.ProcessEnv;

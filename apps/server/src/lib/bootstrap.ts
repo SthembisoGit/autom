@@ -1,13 +1,18 @@
 import { getEnabledPublisherPlatforms, loadEnv } from '@autom/config';
 import type { Platform } from '@autom/contracts';
 
-import { cleanupJobArtifacts } from '../lib/artifacts.js';
 import {
   type CommandRunner,
   FfmpegRenderer,
   StubRenderer,
   createProcessRunner,
-} from '../media/ffmpeg-renderer.js';
+} from '../domains/production/render/index.js';
+import { createTranscriptionProvider } from '../domains/production/transcription-provider.js';
+import { createVoiceProvider } from '../domains/production/voice-provider.js';
+import { createScriptProvider } from '../domains/editorial/script-provider.js';
+import { createNewsProvider } from '../domains/research/news-provider.js';
+import { createVisualProvider } from '../domains/visuals/visual-provider.js';
+import { cleanupJobArtifacts } from '../lib/artifacts.js';
 import { ArtifactsService } from '../modules/artifacts.js';
 import { AuditService } from '../modules/audit.js';
 import { JobsService } from '../modules/jobs.js';
@@ -16,11 +21,6 @@ import { PublicationsService } from '../modules/publications.js';
 import { ReviewsService } from '../modules/reviews.js';
 import { SchedulerService } from '../modules/scheduler.js';
 import { WorkflowService } from '../modules/workflow.js';
-import { createVoiceProvider } from '../providers/deepgram-provider.js';
-import { createScriptProvider } from '../providers/gemini-provider.js';
-import { createTranscriptionProvider } from '../providers/groq-provider.js';
-import { createNewsProvider } from '../providers/news-provider.js';
-import { createVisualProvider } from '../providers/pexels-provider.js';
 import { FacebookPublisher } from '../publishers/facebook.js';
 import { LocalPublisher } from '../publishers/local.js';
 import { TikTokPublisher } from '../publishers/tiktok.js';
