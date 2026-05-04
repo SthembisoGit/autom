@@ -11,7 +11,7 @@ import { createApp } from '../src/app.js';
 import { writeArtifactFile } from '../src/lib/artifacts.js';
 import { bootstrap } from '../src/lib/bootstrap.js';
 import type { Publisher, ScriptProvider, VisualProvider, VoiceProvider } from '../src/lib/types.js';
-import { StubRenderer, type CommandRunner } from '../src/media/ffmpeg-renderer.js';
+import { type CommandRunner, StubRenderer } from '../src/media/ffmpeg-renderer.js';
 
 function buildTestEnv(
   workspaceRoot: string,
@@ -109,14 +109,128 @@ async function createTestContext(options?: {
     mediaRenderer: new StubRenderer(),
     publishers: options?.publishers,
     commandRunner: options?.commandRunner,
-    scriptProvider: options?.scriptProvider,
+    scriptProvider: options?.scriptProvider ?? createScriptProviderStub(),
     voiceProvider: options?.voiceProvider,
-    visualProvider: options?.visualProvider,
+    visualProvider: options?.visualProvider ?? createVisualProviderStub(),
   });
 
   return {
     app,
     workspaceRoot,
+  };
+}
+
+function createVisualProviderStub(): VisualProvider {
+  return {
+    async select({ scriptPackage }) {
+      return {
+        selectedVisualQueries: scriptPackage.scenes.map((scene) => scene.visualQuery),
+        assetReferences: scriptPackage.scenes.map((scene) => ({
+          kind: 'video' as const,
+          path: `stub/scene-${scene.order}.mp4`,
+          label: `Stub scene ${scene.order}`,
+          provider: 'system' as const,
+          sourceUrl: null,
+          mimeType: 'video/mp4',
+          externalId: null,
+          sceneOrder: scene.order,
+          query: scene.visualQuery,
+          retrievalOrigin: 'stock' as const,
+          licenseLabel: null,
+          rightsSummary: 'Stub test asset.',
+          attributionRequired: false,
+          entityLabel: null,
+          matchQuality: null,
+          reuseStatus: null,
+        })),
+        warnings: [],
+      };
+    },
+  };
+}
+
+function createScriptProviderStub(): ScriptProvider {
+  return {
+    async generate(profile, topic) {
+      const sceneCount = Math.max(profile.sceneCount, 6);
+      return {
+        scriptPackage: {
+          id: `script_${topic.toLowerCase().replace(/\s+/g, '_')}`,
+          title: `About ${topic}`,
+          description: `A concise explainer about ${topic}.`,
+          tags: ['explained', 'systems'],
+          scenes: Array.from({ length: sceneCount }, (_, index) => ({
+            order: index + 1,
+            text:
+              index === 0
+                ? `Here is the real payoff behind ${topic}.`
+                : `Scene ${index + 1} adds one concrete detail about ${topic}.`,
+            visualQuery: `${topic} scene ${index + 1}`,
+            durationSeconds: 4,
+            visualMode: 'auto' as const,
+          })),
+          totalDurationSeconds: sceneCount * 4,
+          dialogue: null,
+        },
+        scriptMetadata: {
+          provider: 'local',
+          model: null,
+          promptVersion: 'local-script-template-v1',
+          mode: 'stub',
+          attemptCount: 1,
+          repaired: false,
+          searchProvider: 'none',
+          rerankProvider: 'none',
+          verificationStatus: 'unverified',
+          evidenceSourceCount: 0,
+          fallbackProvider: null,
+          providerChain: ['local'],
+          categoryId: null,
+          categoryLabel: null,
+          platformFit: null,
+          countryTargets: [],
+          monetizationScore: null,
+          storyAngle: null,
+          hookStyle: null,
+          warnings: [],
+        },
+      };
+    },
+  };
+}
+
+function buildProfilePayload(
+  profile: Record<string, unknown>,
+  overrides?: Record<string, unknown>
+) {
+  return {
+    name: profile.name,
+    niche: profile.niche,
+    tone: profile.tone,
+    visualStyle: profile.visualStyle,
+    promptDirectives: profile.promptDirectives,
+    contentCategories: profile.contentCategories,
+    sceneCount: profile.sceneCount,
+    maxDurationSeconds: profile.maxDurationSeconds,
+    defaultHashtags: profile.defaultHashtags,
+    callToActionStyle: profile.callToActionStyle,
+    callToActionTemplate: profile.callToActionTemplate,
+    callToActionGuardrails: profile.callToActionGuardrails,
+    affiliateLinkTemplate: profile.affiliateLinkTemplate,
+    requireAffiliateDisclosure: profile.requireAffiliateDisclosure,
+    affiliateDisclosureTemplate: profile.affiliateDisclosureTemplate,
+    contentMode: profile.contentMode,
+    topicSource: profile.topicSource,
+    dialogueCharacterPresetId: profile.dialogueCharacterPresetId,
+    dialogueHostAName: profile.dialogueHostAName,
+    dialogueHostBName: profile.dialogueHostBName,
+    dialogueVoiceA: profile.dialogueVoiceA,
+    dialogueVoiceB: profile.dialogueVoiceB,
+    enabled: profile.enabled,
+    scheduleCron: profile.scheduleCron,
+    targetPlatforms: profile.targetPlatforms,
+    defaultVoice: profile.defaultVoice,
+    ...overrides,
   };
 }
 
@@ -285,19 +399,22 @@ test('server workflow creates, reviews, and publishes a job', async () => {
       id: string;
       name: string;
       niche: string;
-      preferredTopics: string[];
+      contentCategories: Array<{ id: string; label: string }>;
       targetPlatforms: string[];
       defaultHashtags: string[];
+      maxDurationSeconds: number;
     }>;
     assert.equal(profiles[0]?.name, 'autoM Media');
-    assert.equal(profiles[0]?.niche, 'high-intent finance, SaaS, and digital growth');
-    assert.equal(profiles[0]?.maxDurationSeconds, 90);
-    assert.deepEqual(profiles[0]?.preferredTopics.slice(0, 3), [
-      'Best CRM for 2026',
-      'AI workflow automation',
-      'SEO and programmatic SEO guides',
-    ]);
-    assert.deepEqual(profiles[0]?.defaultHashtags, ['finance', 'saas', 'automation', 'seo']);
+    assert.equal(
+      profiles[0]?.niche,
+      'meta-first explainers for business, technology, current affairs, history, and practical life/work topics'
+    );
+    assert.equal(profiles[0]?.maxDurationSeconds, 180);
+    assert.deepEqual(
+      profiles[0]?.contentCategories.slice(0, 3).map((category) => category.id),
+      ['business_tech_news', 'consumer_tech_and_ai', 'money_work_and_tools']
+    );
+    assert.deepEqual(profiles[0]?.defaultHashtags, ['explained', 'news', 'tech', 'business']);
     assert.deepEqual(profiles[0]?.targetPlatforms, ['local']);
 
     const createResponse = await app.inject({
@@ -305,7 +422,7 @@ test('server workflow creates, reviews, and publishes a job', async () => {
       url: '/jobs/generate',
       payload: {
         profileId: profiles[0]?.id,
-        topic: 'discipline over hype',
+        topic: 'practical weekly planning workflow',
       },
     });
     assert.equal(createResponse.statusCode, 200);
@@ -319,6 +436,10 @@ test('server workflow creates, reviews, and publishes a job', async () => {
     assert.equal(createdJob.scriptMetadata.provider, 'local');
     assert.equal(createdJob.scriptMetadata.promptVersion, 'local-script-template-v1');
     assert.equal(createResponse.json().reviewPackage.renderBundle.thumbnailPath !== null, true);
+    assert.equal(
+      Array.isArray(createResponse.json().reviewPackage.visualSelectionOutcomes),
+      true
+    );
     assert.equal(
       createResponse
         .json()
@@ -403,30 +524,14 @@ test('server workflow creates, reviews, and publishes a job', async () => {
   }
 });
 
-test('server pauses for a manual clip and resumes after upload', async () => {
-  const commandRunner: CommandRunner = async () => ({
-    stdout: JSON.stringify({
-      streams: [
-        {
-          width: 1080,
-          height: 1920,
-          codec_name: 'h264',
-        },
-      ],
-      format: {
-        duration: '8.0',
-      },
-    }),
-    stderr: '',
-  });
-
+test('server no longer pauses for manual clips and continues directly to review', async () => {
   const scriptProvider: ScriptProvider = {
     async generate() {
       return {
         scriptPackage: {
-          id: 'script_manual_clip',
-          title: 'Manual Clip Script',
-          description: 'Testing manual clip intake.',
+          id: 'script_direct_review',
+          title: 'Direct Review Script',
+          description: 'Testing that manual intake is removed.',
           tags: ['crm', 'demo'],
           scenes: [
             {
@@ -445,6 +550,13 @@ test('server pauses for a manual clip and resumes after upload', async () => {
           mode: 'stub',
           attemptCount: 1,
           repaired: false,
+          searchProvider: 'none',
+          rerankProvider: 'none',
+          verificationStatus: 'unverified',
+          evidenceSourceCount: 0,
+          fallbackProvider: null,
+          providerChain: ['local'],
+          warnings: [],
         },
       };
     },
@@ -461,11 +573,7 @@ test('server pauses for a manual clip and resumes after upload', async () => {
     },
   };
 
-  const { app, workspaceRoot } = await createTestContext({
-    commandRunner,
-    scriptProvider,
-    voiceProvider,
-  });
+  const { app, workspaceRoot } = await createTestContext({ scriptProvider, voiceProvider });
 
   try {
     const profilesResponse = await app.inject({
@@ -483,31 +591,8 @@ test('server pauses for a manual clip and resumes after upload', async () => {
       },
     });
     assert.equal(createResponse.statusCode, 200);
-    assert.equal(createResponse.json().status, 'waiting_for_manual_clip');
-
-    const manualClipBundle = createResponse.json().manualClipBundle as {
-      requests: Array<{
-        sceneOrder: number;
-        prompt: string;
-        audioDirective: string;
-        status: string;
-      }>;
-    };
-    assert.equal(manualClipBundle.requests.length, 1);
-    assert.match(manualClipBundle.requests[0]?.prompt ?? '', /Manual Veo clip brief/i);
-    assert.match(manualClipBundle.requests[0]?.audioDirective ?? '', /no spoken dialogue/i);
-
-    const uploadResponse = await app.inject({
-      method: 'POST',
-      url: `/jobs/${createResponse.json().id}/manual-clips/${manualClipBundle.requests[0]?.sceneOrder}`,
-      headers: {
-        'content-type': 'video/mp4',
-        'x-file-name': 'manual-clip.mp4',
-      },
-      payload: Buffer.from('fake-mp4-data'),
-    });
-    assert.equal(uploadResponse.statusCode, 200);
-    assert.equal(uploadResponse.json().status, 'review_pending');
+    assert.equal(createResponse.json().status, 'review_pending');
+    assert.equal(createResponse.json().manualClipBundle, null);
 
     const detailResponse = await app.inject({
       method: 'GET',
@@ -516,14 +601,6 @@ test('server pauses for a manual clip and resumes after upload', async () => {
     assert.equal(detailResponse.statusCode, 200);
     assert.equal(detailResponse.json().job.status, 'review_pending');
     assert.equal(detailResponse.json().progress.stage, 'ready_for_review');
-    assert.equal(
-      detailResponse
-        .json()
-        .job.reviewPackage.assetBundle.assetReferences.some(
-          (reference: { provider: string }) => reference.provider === 'veo'
-        ),
-      true
-    );
   } finally {
     await app.close();
     await rm(workspaceRoot, { recursive: true, force: true });
@@ -564,7 +641,7 @@ test('server returns useful error codes and blocks invalid state transitions', a
       url: '/jobs/generate',
       payload: {
         profileId: profiles[0]?.id,
-        topic: 'quality loops',
+        topic: 'practical weekly planning workflow',
       },
     });
     assert.equal(createResponse.statusCode, 200);
@@ -592,17 +669,6 @@ test('server returns useful error codes and blocks invalid state transitions', a
     });
     assert.equal(rejectFromApprovedResponse.statusCode, 200);
 
-    const rejectDraftingResponse = await app.inject({
-      method: 'POST',
-      url: `/reviews/${createdJob.id}/reject`,
-      payload: {},
-    });
-    assert.equal(rejectDraftingResponse.statusCode, 409);
-    assert.equal(
-      rejectDraftingResponse.json().message,
-      `Job ${createdJob.id} cannot be rejected from status drafting.`
-    );
-
     const publishDraftingResponse = await app.inject({
       method: 'POST',
       url: `/publications/${createdJob.id}/publish`,
@@ -627,25 +693,27 @@ test('server blocks duplicate active jobs for the same profile and topic', async
       method: 'GET',
       url: '/profiles',
     });
-    const profiles = profilesResponse.json() as Array<{ id: string }>;
+    const profiles = profilesResponse.json() as Array<{ id: string; contentCategories: unknown[] }>;
     const profileId = profiles[0]?.id;
+    const contentCategories = profiles[0]?.contentCategories ?? [];
 
     const firstCreateResponse = await app.inject({
       method: 'POST',
       url: '/jobs/generate',
       payload: {
         profileId,
-        topic: 'repeatable systems',
+        topic: 'practical weekly planning workflow',
       },
     });
     assert.equal(firstCreateResponse.statusCode, 200);
+    assert.equal(firstCreateResponse.json().status, 'review_pending');
 
     const duplicateResponse = await app.inject({
       method: 'POST',
       url: '/jobs/generate',
       payload: {
         profileId,
-        topic: '  repeatable systems  ',
+        topic: '  practical weekly planning workflow  ',
       },
     });
     assert.equal(duplicateResponse.statusCode, 409);
@@ -656,7 +724,7 @@ test('server blocks duplicate active jobs for the same profile and topic', async
   }
 });
 
-test('bootstrap upgrades an untouched tech profile to the balanced strategy', async () => {
+test('bootstrap upgrades an untouched tech profile to the daily news narration strategy', async () => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-bootstrap-'));
   const env = buildTestEnv(workspaceRoot);
 
@@ -678,33 +746,11 @@ test('bootstrap upgrades an untouched tech profile to the balanced strategy', as
         'financial charts, dashboard interfaces, software screens, marketing analytics, office workflows, smart desk setups, cinematic business b-roll',
       promptDirectives:
         'Lead with a practical hook, explain the tool or strategy simply, compare alternatives when helpful, keep claims specific and verifiable, and finish with a concrete payoff. Keep the script optimized for people searching for solutions, tutorials, comparisons, and buyer-intent questions. If finance appears, keep it tool-led or comparison-led and avoid advice or promises. Avoid empty hype, fearbait, fake urgency, legal drama, revenge framing, recap-style storytelling, and exaggerated promises.',
-      preferredTopics: [
-        'Best CRM for 2026',
-        'AI workflow automation',
-        'SEO and programmatic SEO guides',
-        'AI tool tutorials',
-        'Paid ad scaling systems',
-        'Tax strategy software',
-        'Retirement planning tools',
-        'Real estate investing tools',
-        'High-ticket affiliate software reviews',
-        'B2B SaaS comparisons',
-      ],
-      bannedTopics: [
-        'partisan politics',
-        'medical advice',
-        'celebrity gossip',
-        'unverified breaking news',
-      ],
-      bannedTerms: [
-        'guaranteed income',
-        'overnight success',
-        'secret loophole',
-        'must-buy before it sells out',
-      ],
+      contentCategories: seededProfile.contentCategories,
       defaultHashtags: ['finance', 'saas', 'automation', 'seo'],
       callToActionStyle: 'educational',
-      callToActionTemplate: 'Follow autoM Media for the next tool, strategy, or comparison worth knowing.',
+      callToActionTemplate:
+        'Follow autoM Media for the next tool, strategy, or comparison worth knowing.',
       callToActionGuardrails:
         'Keep the CTA short, honest, and product-led. Do not use fake urgency or promise personal, financial, or life-changing outcomes.',
       targetPlatforms: ['local', 'youtube'],
@@ -720,17 +766,21 @@ test('bootstrap upgrades an untouched tech profile to the balanced strategy', as
   });
 
   try {
-    const migratedProfile = secondContext.repository.getProfile('profile_default');
+    const migratedProfile = secondContext.profilesService.get('profile_default');
     assert.ok(migratedProfile);
     assert.equal(migratedProfile.name, 'autoM Media');
-    assert.equal(migratedProfile.niche, 'high-intent finance, SaaS, and digital growth');
-    assert.equal(migratedProfile.maxDurationSeconds, 90);
-    assert.deepEqual(migratedProfile.preferredTopics.slice(0, 3), [
-      'Best CRM for 2026',
-      'AI workflow automation',
-      'SEO and programmatic SEO guides',
-    ]);
-    assert.deepEqual(migratedProfile.defaultHashtags, ['finance', 'saas', 'automation', 'seo']);
+    assert.equal(
+      migratedProfile.niche,
+      'meta-first explainers for business, technology, current affairs, history, and practical life/work topics'
+    );
+    assert.equal(migratedProfile.maxDurationSeconds, 180);
+    assert.deepEqual(migratedProfile.defaultHashtags, ['explained', 'news', 'tech', 'business']);
+    assert.equal(migratedProfile.contentMode, 'narration');
+    assert.equal(migratedProfile.topicSource, 'category_pool');
+    assert.deepEqual(
+      migratedProfile.contentCategories.slice(0, 2).map((category) => category.id),
+      ['business_tech_news', 'consumer_tech_and_ai']
+    );
     assert.deepEqual(migratedProfile.targetPlatforms, ['local', 'youtube']);
   } finally {
     await secondContext.schedulerService.stop();
@@ -739,7 +789,7 @@ test('bootstrap upgrades an untouched tech profile to the balanced strategy', as
   }
 });
 
-test('bootstrap still upgrades the older stoic legacy profile to the balanced strategy', async () => {
+test('bootstrap still upgrades the older stoic legacy profile to the daily news narration strategy', async () => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-bootstrap-'));
   const env = buildTestEnv(workspaceRoot);
 
@@ -760,9 +810,7 @@ test('bootstrap still upgrades the older stoic legacy profile to the balanced st
       visualStyle: 'high-contrast monochrome portraits, city architecture, deliberate movement',
       promptDirectives:
         'Keep each script practical, reflective, and specific. Avoid hype language and vague promises.',
-      preferredTopics: ['discipline', 'focus', 'self-command', 'money habits', 'decision making'],
-      bannedTopics: ['partisan politics', 'medical advice', 'get rich quick schemes'],
-      bannedTerms: ['guaranteed income', 'overnight success', 'secret loophole'],
+      contentCategories: seededProfile.contentCategories,
       defaultHashtags: ['stoicism', 'mindset', 'wealthhabits'],
       callToActionStyle: 'community',
       callToActionTemplate: 'Follow for the next short lesson and save this idea for later.',
@@ -781,16 +829,20 @@ test('bootstrap still upgrades the older stoic legacy profile to the balanced st
   });
 
   try {
-    const migratedProfile = secondContext.repository.getProfile('profile_default');
+    const migratedProfile = secondContext.profilesService.get('profile_default');
     assert.ok(migratedProfile);
-    assert.equal(migratedProfile.niche, 'high-intent finance, SaaS, and digital growth');
-    assert.equal(migratedProfile.maxDurationSeconds, 90);
-    assert.deepEqual(migratedProfile.preferredTopics.slice(0, 3), [
-      'Best CRM for 2026',
-      'AI workflow automation',
-      'SEO and programmatic SEO guides',
-    ]);
-    assert.deepEqual(migratedProfile.defaultHashtags, ['finance', 'saas', 'automation', 'seo']);
+    assert.equal(
+      migratedProfile.niche,
+      'meta-first explainers for business, technology, current affairs, history, and practical life/work topics'
+    );
+    assert.equal(migratedProfile.maxDurationSeconds, 180);
+    assert.deepEqual(migratedProfile.defaultHashtags, ['explained', 'news', 'tech', 'business']);
+    assert.equal(migratedProfile.contentMode, 'narration');
+    assert.equal(migratedProfile.topicSource, 'category_pool');
+    assert.deepEqual(
+      migratedProfile.contentCategories.slice(0, 2).map((category) => category.id),
+      ['business_tech_news', 'consumer_tech_and_ai']
+    );
     assert.deepEqual(migratedProfile.targetPlatforms, ['local', 'youtube']);
   } finally {
     await secondContext.schedulerService.stop();
@@ -870,6 +922,8 @@ test('failed jobs marked retryable can be retried from the run detail flow', asy
         return renderer.render(input);
       },
     },
+    scriptProvider: createScriptProviderStub(),
+    visualProvider: createVisualProviderStub(),
   });
 
   try {
@@ -884,7 +938,7 @@ test('failed jobs marked retryable can be retried from the run detail flow', asy
       url: '/jobs/generate',
       payload: {
         profileId: profile.id,
-        topic: 'retryable workflow check',
+        topic: 'practical weekly planning workflow',
       },
     });
     assert.equal(createResponse.statusCode, 200);
@@ -911,6 +965,244 @@ test('failed jobs marked retryable can be retried from the run detail flow', asy
   }
 });
 
+test('drafting jobs can be cancelled and finish as cancelled after the current safe step', async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-cancel-'));
+  const env = buildTestEnv(workspaceRoot);
+  let releaseScriptGeneration!: () => void;
+  let signalScriptStart!: () => void;
+  const scriptStarted = new Promise<void>((resolve) => {
+    signalScriptStart = resolve;
+  });
+  const scriptBlocked = new Promise<void>((resolve) => {
+    releaseScriptGeneration = resolve;
+  });
+  const baseScriptProvider = createScriptProviderStub();
+
+  const app = await createApp({
+    env,
+    mediaRenderer: new StubRenderer(),
+    scriptProvider: {
+      async generate(profile, topic) {
+        signalScriptStart();
+        await scriptBlocked;
+        return baseScriptProvider.generate(profile, topic);
+      },
+    },
+    visualProvider: createVisualProviderStub(),
+  });
+
+  try {
+    const profilesResponse = await app.inject({
+      method: 'GET',
+      url: '/profiles',
+    });
+    const profile = profilesResponse.json()[0] as { id: string };
+
+    const createPromise = app.inject({
+      method: 'POST',
+      url: '/jobs/generate',
+      payload: {
+        profileId: profile.id,
+        topic: 'cancelled drafting job',
+      },
+    });
+
+    await scriptStarted;
+
+    const monitorResponse = await app.inject({
+      method: 'GET',
+      url: '/jobs/monitor',
+    });
+    assert.equal(monitorResponse.statusCode, 200);
+    const activeJob = (monitorResponse.json().active as Array<{ job: { id: string } }>)[0];
+    assert.ok(activeJob);
+
+    const cancelResponse = await app.inject({
+      method: 'POST',
+      url: `/jobs/${activeJob.job.id}/cancel`,
+      payload: {},
+    });
+    assert.equal(cancelResponse.statusCode, 200);
+    assert.equal(cancelResponse.json().status, 'cancelling');
+
+    releaseScriptGeneration();
+
+    const createResponse = await createPromise;
+    assert.equal(createResponse.statusCode, 200);
+    assert.equal(createResponse.json().status, 'cancelled');
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/jobs/${activeJob.job.id}`,
+    });
+    assert.equal(detailResponse.statusCode, 200);
+    assert.equal(detailResponse.json().progress.stage, 'cancelled');
+  } finally {
+    await app.close();
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('publish-pending jobs can be cancelled and stop further delivery work', async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-cancel-publish-'));
+  const env = buildTestEnv(workspaceRoot);
+  const pendingPublisher: Publisher = {
+    platform: 'youtube',
+    async getConnection() {
+      return createConnectionSummary('youtube');
+    },
+    async getAuthorizationUrl() {
+      return 'https://example.com/youtube/oauth';
+    },
+    async completeAuthorization() {
+      return createConnectionSummary('youtube');
+    },
+    async disconnect() {
+      return createConnectionSummary('youtube');
+    },
+    async publish(job) {
+      return {
+        platform: 'youtube',
+        status: 'pending_processing',
+        externalId: `youtube_${job.id}`,
+        publishedAt: null,
+        message: 'YouTube is still processing the upload.',
+        connectorMode: 'live',
+      };
+    },
+  };
+
+  const { app } = await createTestContext({
+    env: {
+      ENABLED_PUBLISHER_PLATFORMS: 'local,youtube',
+    },
+    publishers: [pendingPublisher],
+  });
+
+  try {
+    const profilesResponse = await app.inject({
+      method: 'GET',
+      url: '/profiles',
+    });
+    const profile = profilesResponse.json()[0] as Record<string, unknown>;
+    const updateProfileResponse = await app.inject({
+      method: 'PUT',
+      url: `/profiles/${profile.id}`,
+      payload: buildProfilePayload(profile, {
+        targetPlatforms: ['youtube'],
+      }),
+    });
+    assert.equal(updateProfileResponse.statusCode, 200);
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/jobs/generate',
+      payload: {
+        profileId: profile.id,
+        topic: 'publish cancellation topic',
+      },
+    });
+    assert.equal(createResponse.statusCode, 200);
+
+    const approveResponse = await app.inject({
+      method: 'POST',
+      url: `/reviews/${createResponse.json().id}/approve`,
+      payload: {},
+    });
+    assert.equal(approveResponse.statusCode, 200);
+
+    const publishResponse = await app.inject({
+      method: 'POST',
+      url: `/publications/${createResponse.json().id}/publish`,
+      payload: {},
+    });
+    assert.equal(publishResponse.statusCode, 200);
+    assert.equal(publishResponse.json().status, 'publish_pending');
+
+    const cancelResponse = await app.inject({
+      method: 'POST',
+      url: `/jobs/${createResponse.json().id}/cancel`,
+      payload: {},
+    });
+    assert.equal(cancelResponse.statusCode, 200);
+    assert.equal(cancelResponse.json().status, 'cancelled');
+  } finally {
+    await app.close();
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('terminal runs can be archived and disappear from monitor and history lists', async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-archive-'));
+  const env = buildTestEnv(workspaceRoot);
+
+  const app = await createApp({
+    env,
+    mediaRenderer: {
+      async render() {
+        throw new Error('Permanent render failure.');
+      },
+    },
+    scriptProvider: createScriptProviderStub(),
+    visualProvider: createVisualProviderStub(),
+  });
+
+  try {
+    const profilesResponse = await app.inject({
+      method: 'GET',
+      url: '/profiles',
+    });
+    const profile = profilesResponse.json()[0] as { id: string };
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/jobs/generate',
+      payload: {
+        profileId: profile.id,
+        topic: 'archive me',
+      },
+    });
+    assert.equal(createResponse.statusCode, 200);
+    assert.equal(createResponse.json().status, 'failed');
+    const jobId = createResponse.json().id as string;
+
+    const archiveResponse = await app.inject({
+      method: 'POST',
+      url: `/jobs/${jobId}/archive`,
+      payload: {},
+    });
+    assert.equal(archiveResponse.statusCode, 200);
+    assert.ok(archiveResponse.json().archivedAt);
+
+    const monitorResponse = await app.inject({
+      method: 'GET',
+      url: '/jobs/monitor',
+    });
+    assert.equal(monitorResponse.statusCode, 200);
+    assert.equal(monitorResponse.json().failed.length, 0);
+
+    const historyResponse = await app.inject({
+      method: 'GET',
+      url: '/history',
+    });
+    assert.equal(historyResponse.statusCode, 200);
+    assert.equal(
+      historyResponse.json().some((job: { id: string }) => job.id === jobId),
+      false
+    );
+
+    const detailResponse = await app.inject({
+      method: 'GET',
+      url: `/jobs/${jobId}`,
+    });
+    assert.equal(detailResponse.statusCode, 200);
+    assert.equal(detailResponse.json().job.archivedAt !== null, true);
+  } finally {
+    await app.close();
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('profile updates validate richer prompt rules and policy constraints', async () => {
   const { app, workspaceRoot } = await createTestContext();
 
@@ -919,8 +1211,9 @@ test('profile updates validate richer prompt rules and policy constraints', asyn
       method: 'GET',
       url: '/profiles',
     });
-    const profiles = profilesResponse.json() as Array<{ id: string }>;
+    const profiles = profilesResponse.json() as Array<{ id: string; contentCategories: unknown[] }>;
     const profileId = profiles[0]?.id;
+    const contentCategories = profiles[0]?.contentCategories ?? [];
 
     const invalidProfileResponse = await app.inject({
       method: 'PUT',
@@ -931,9 +1224,7 @@ test('profile updates validate richer prompt rules and policy constraints', asyn
         tone: 'clear and decisive',
         visualStyle: 'architectural black and white footage',
         promptDirectives: 'Use crisp practical guidance.',
-        preferredTopics: ['systems', 'habits'],
-        bannedTopics: ['medical advice'],
-        bannedTerms: ['guaranteed outcome'],
+        contentCategories,
         sceneCount: 7,
         maxDurationSeconds: 18,
         defaultHashtags: ['systems', 'discipline'],
@@ -961,9 +1252,7 @@ test('profile updates validate richer prompt rules and policy constraints', asyn
         tone: 'clear and decisive',
         visualStyle: 'architectural black and white footage',
         promptDirectives: 'Use crisp practical guidance.',
-        preferredTopics: ['systems', 'habits'],
-        bannedTopics: ['medical advice'],
-        bannedTerms: ['guaranteed outcome'],
+        contentCategories,
         sceneCount: 6,
         maxDurationSeconds: 180,
         defaultHashtags: ['systems', 'discipline'],
@@ -981,7 +1270,7 @@ test('profile updates validate richer prompt rules and policy constraints', asyn
     });
     assert.equal(validProfileResponse.statusCode, 200);
     assert.equal(validProfileResponse.json().callToActionStyle, 'affiliate');
-    assert.deepEqual(validProfileResponse.json().preferredTopics, ['systems', 'habits']);
+    assert.equal(validProfileResponse.json().contentCategories.length > 0, true);
 
     const oversizedProfileResponse = await app.inject({
       method: 'PUT',
@@ -992,9 +1281,7 @@ test('profile updates validate richer prompt rules and policy constraints', asyn
         tone: 'clear and decisive',
         visualStyle: 'architectural black and white footage',
         promptDirectives: 'Use crisp practical guidance.',
-        preferredTopics: ['systems', 'habits'],
-        bannedTopics: ['medical advice'],
-        bannedTerms: ['guaranteed outcome'],
+        contentCategories,
         sceneCount: 6,
         maxDurationSeconds: 181,
         defaultHashtags: ['systems', 'discipline'],
@@ -1012,17 +1299,6 @@ test('profile updates validate richer prompt rules and policy constraints', asyn
     });
     assert.equal(oversizedProfileResponse.statusCode, 400);
     assert.equal(oversizedProfileResponse.json().message, 'Invalid request payload.');
-
-    const blockedTopicResponse = await app.inject({
-      method: 'POST',
-      url: '/jobs/generate',
-      payload: {
-        profileId,
-        topic: 'Medical advice for entrepreneurs',
-      },
-    });
-    assert.equal(blockedTopicResponse.statusCode, 400);
-    assert.match(blockedTopicResponse.json().message, /violates profile policy/i);
 
     const profileSchemaResponse = await app.inject({
       method: 'GET',
@@ -1053,7 +1329,7 @@ test('default launch scope seeds local targets, hides TikTok, and rejects explic
       url: '/jobs/generate',
       payload: {
         profileId: profile.id,
-        topic: 'launch scope check',
+        topic: 'practical weekly planning workflow',
       },
     });
     assert.equal(createResponse.statusCode, 200);
@@ -1142,6 +1418,13 @@ test('server cleans partial job assets when rendering fails', async () => {
               externalId: null,
               sceneOrder: null,
               query: null,
+              retrievalOrigin: 'research',
+              licenseLabel: null,
+              rightsSummary: null,
+              attributionRequired: false,
+              entityLabel: null,
+              matchQuality: null,
+              reuseStatus: null,
             },
           ],
           warnings: [],
@@ -1166,6 +1449,13 @@ test('server cleans partial job assets when rendering fails', async () => {
               externalId: 'asset-1',
               sceneOrder: 1,
               query: scriptPackage.scenes[0]?.visualQuery ?? 'fallback-query',
+              retrievalOrigin: 'stock',
+              licenseLabel: 'Pexels License',
+              rightsSummary: 'Custom clip injected for test coverage.',
+              attributionRequired: false,
+              entityLabel: null,
+              matchQuality: null,
+              reuseStatus: null,
             },
           ],
           warnings: [],
@@ -1340,7 +1630,7 @@ test('publish retries only retry unfinished platforms and preserve successful re
       url: '/jobs/generate',
       payload: {
         profileId: profiles[0]?.id,
-        topic: 'retry publish safety',
+        topic: 'practical weekly planning workflow',
       },
     });
     assert.equal(createResponse.statusCode, 200);
@@ -1362,10 +1652,7 @@ test('publish retries only retry unfinished platforms and preserve successful re
     });
     assert.equal(firstPublishResponse.statusCode, 200);
     assert.equal(firstPublishResponse.json().status, 'failed');
-    assert.match(
-      firstPublishResponse.json().errorMessage,
-      /TikTok upload failed/i
-    );
+    assert.match(firstPublishResponse.json().errorMessage, /TikTok upload failed/i);
     assert.equal(youtubePublisher.getPublishCount(), 1);
     assert.equal(tiktokPublisher.getPublishCount(), 1);
     assert.equal(facebookPublisher.getPublishCount(), 1);

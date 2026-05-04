@@ -1,0 +1,38 @@
+{
+  "canvas": {
+    "width": 420,
+    "height": 760
+  },
+  "subtitleSafeZone": {
+    "top": 1540,
+    "height": 230
+  },
+  "hosts": {
+    "hostA": {
+      "scale": 0.98,
+      "bodyOrigin": { "x": 94, "y": 154 },
+      "bodyNeckAnchor": { "x": 116, "y": 108 },
+      "headNeckAnchor": { "x": 95, "y": 168 },
+      "hairAnchor": { "x": 105, "y": 42 },
+      "hairTargetOnHead": { "x": 96, "y": 44 },
+      "eyesAnchor": { "x": 52, "y": 18 },
+      "eyesTargetOnHead": { "x": 95, "y": 94 },
+      "mouthAnchor": { "x": 45, "y": 22 },
+      "mouthTargetOnHead": { "x": 98, "y": 138 },
+      "layout": { "x": 78, "y": 696 }
+    },
+    "hostB": {
+      "scale": 0.98,
+      "bodyOrigin": { "x": 96, "y": 156 },
+      "bodyNeckAnchor": { "x": 116, "y": 108 },
+      "headNeckAnchor": { "x": 95, "y": 168 },
+      "hairAnchor": { "x": 107, "y": 44 },
+      "hairTargetOnHead": { "x": 96, "y": 46 },
+      "eyesAnchor": { "x": 52, "y": 18 },
+      "eyesTargetOnHead": { "x": 95, "y": 96 },
+      "mouthAnchor": { "x": 45, "y": 22 },
+      "mouthTargetOnHead": { "x": 98, "y": 140 },
+      "layout": { "x": 600, "y": 708 }
+    }
+  }
+}

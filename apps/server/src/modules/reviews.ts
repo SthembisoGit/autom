@@ -15,7 +15,10 @@ export class ReviewsService {
   list(): GenerationJob[] {
     return this.repository
       .listReviewJobs()
-      .filter((job) => job.status !== 'publish_pending' || hasPendingPublicationWork(job.publicationResults));
+      .filter(
+        (job) =>
+          job.status !== 'publish_pending' || hasPendingPublicationWork(job.publicationResults)
+      );
   }
 
   approve(jobId: string, note?: string): GenerationJob {

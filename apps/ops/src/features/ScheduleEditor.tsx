@@ -1,4 +1,4 @@
-import type { ChangeEvent } from 'react';
+import React, { type ChangeEvent } from 'react';
 
 import {
   SCHEDULE_PRESETS,

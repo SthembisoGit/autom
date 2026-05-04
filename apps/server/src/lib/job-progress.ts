@@ -61,7 +61,9 @@ export function summarizePublicationResults(results: PublicationResult[]): strin
 
   const published = results.filter((result) => result.status === 'published');
   const failed = results.filter((result) => result.status === 'failed');
-  const pendingConfiguration = results.filter((result) => result.status === 'pending_configuration');
+  const pendingConfiguration = results.filter(
+    (result) => result.status === 'pending_configuration'
+  );
 
   if (published.length === 0 && failed.length === 0 && pendingConfiguration.length === 0) {
     return null;
@@ -86,7 +88,11 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
     job.publicationResults.length > 0 &&
     job.publicationResults.every((result) => result.status === 'published');
   const failureMessage =
-    job.errorMessage ?? latestErrorAudit?.message ?? publicationSummary ?? latestAudit?.message ?? null;
+    job.errorMessage ??
+    latestErrorAudit?.message ??
+    publicationSummary ??
+    latestAudit?.message ??
+    null;
   const retryableFailure = Boolean(failureMessage && isRetryableFailureMessage(failureMessage));
 
   if (!hasPendingPublication && job.publicationResults.length > 0) {
@@ -126,13 +132,38 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
     return JobProgressSchema.parse({
       stage: 'failed',
       title: retryableFailure ? 'Retry recommended' : 'Run failed',
-      detail:
-        failureMessage ??
-        'The workflow failed before review or publishing was completed.',
+      detail: failureMessage ?? 'The workflow failed before review or publishing was completed.',
       tone: 'danger',
       isTerminal: true,
       retryable: retryableFailure,
       updatedAt: job.updatedAt,
+    });
+  }
+
+  if (job.status === 'cancelled') {
+    return JobProgressSchema.parse({
+      stage: 'cancelled',
+      title: 'Run cancelled',
+      detail:
+        failureMessage ??
+        latestAudit?.message ??
+        'The run was cancelled from the ops console before it finished.',
+      tone: 'warning',
+      isTerminal: true,
+      retryable: false,
+      updatedAt: job.updatedAt,
+    });
+  }
+
+  if (job.status === 'cancelling') {
+    return JobProgressSchema.parse({
+      stage: 'cancelling',
+      title: 'Cancelling run',
+      detail: latestAudit?.message ?? 'The run is finishing its current safe step before it stops.',
+      tone: 'warning',
+      isTerminal: false,
+      retryable: false,
+      updatedAt: latestAudit?.createdAt ?? job.updatedAt,
     });
   }
 
@@ -210,8 +241,7 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
       stage: 'publishing',
       title: 'Publishing in progress',
       detail:
-        latestAudit?.message ??
-        'The run is approved and waiting for publisher delivery to finish.',
+        latestAudit?.message ?? 'The run is approved and waiting for publisher delivery to finish.',
       tone: 'info',
       isTerminal: false,
       retryable: false,
@@ -240,18 +270,6 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
       isTerminal: false,
       retryable: false,
       updatedAt: job.reviewPackage?.generatedAt ?? job.updatedAt,
-    });
-  }
-
-  if (job.status === 'waiting_for_manual_clip') {
-    return JobProgressSchema.parse({
-      stage: 'waiting_for_manual_clip',
-      title: 'Waiting for manual clip upload',
-      detail: buildManualClipProgressDetail(job),
-      tone: 'warning',
-      isTerminal: false,
-      retryable: false,
-      updatedAt: job.manualClipBundle?.updatedAt ?? job.updatedAt,
     });
   }
 
@@ -301,34 +319,6 @@ function findLatestStageMarker(
   }
 
   return null;
-}
-
-function buildManualClipProgressDetail(job: GenerationJob): string {
-  const bundle = job.manualClipBundle;
-  if (!bundle || bundle.requests.length === 0) {
-    return 'The workflow is waiting for a manual premium clip before it continues.';
-  }
-
-  const pendingRequests = bundle.requests.filter((request) => request.status === 'pending').length;
-  const uploadedRequests = bundle.requests.filter((request) => request.status === 'uploaded').length;
-  const expiredRequests = bundle.requests.filter((request) => request.status === 'expired').length;
-  const remainingMinutes = Math.max(1, Math.ceil(bundle.waitTimeoutSeconds / 60));
-
-  if (pendingRequests > 0) {
-    return `Waiting for ${pendingRequests} manual clip${pendingRequests === 1 ? '' : 's'} to be uploaded. ${uploadedRequests} clip${
-      uploadedRequests === 1 ? '' : 's'
-    } already attached. The workflow will fall back to Pexels after ${remainingMinutes} minute${
-      remainingMinutes === 1 ? '' : 's'
-    }.`;
-  }
-
-  if (expiredRequests > 0) {
-    return `All requested clips were not uploaded in time, so the workflow is falling back to Pexels for ${expiredRequests} scene${
-      expiredRequests === 1 ? '' : 's'
-    }.`;
-  }
-
-  return 'The manual clip has been uploaded and the workflow is resuming now.';
 }
 
 function formatPublicationResultSummary(result: PublicationResult): string {

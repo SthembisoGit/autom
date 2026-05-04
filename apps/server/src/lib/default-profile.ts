@@ -1,4 +1,4 @@
-import type { ContentProfile } from '@autom/contracts';
+import type { ContentCategory, ContentProfile } from '@autom/contracts';
 
 import { nowIso } from './time.js';
 
@@ -9,16 +9,45 @@ type DefaultProfileSignature = Pick<
   | 'tone'
   | 'visualStyle'
   | 'promptDirectives'
-  | 'preferredTopics'
-  | 'bannedTopics'
-  | 'bannedTerms'
   | 'defaultHashtags'
   | 'callToActionStyle'
   | 'callToActionTemplate'
   | 'callToActionGuardrails'
 >;
 
+const PRIMARY_COUNTRIES = ['US', 'UK', 'CA', 'AU'];
+const SECONDARY_COUNTRIES = ['DE', 'IE', 'NL', 'NZ', 'SG'];
+
 const UPGRADABLE_DEFAULT_PROFILE_SIGNATURES: DefaultProfileSignature[] = [
+  {
+    name: 'autoM Media',
+    niche: 'Fascinating stories, hidden knowledge, and clever ideas',
+    tone: 'simple, engaging, curious, and clear',
+    visualStyle:
+      'cinematic b-roll, archival footage, news graphics, data visualizations, and dynamic text',
+    promptDirectives:
+      'Your main task is to create a compelling, easy-to-understand video script for one of the supplied categories. Focus on great storytelling that will make someone watch the entire video. Use simple English. For business ideas, be specific and clever, not generic. For facts, find a surprising hook. For history, reveal something interesting. For news, explain a major trending story simply and clearly. CRITICAL FOR VISUALS: To prevent repeating stock footage, you MUST write highly specific and literal visual search queries for every scene. Never use generic terms like "history" or "business". Use highly distinct, specific descriptions like "1920s black and white street view", "animated chart showing business growth", or "close up on an ancient egyptian artifact".',
+    defaultHashtags: ['didyouknow', 'history', 'businessideas', 'worldnews', 'explained'],
+    callToActionStyle: 'community',
+    callToActionTemplate:
+      "Follow for more fascinating stories and ideas you won't find anywhere else.",
+    callToActionGuardrails:
+      'Keep the CTA short, engaging, and focused on curiosity. Do not use fake urgency.',
+  },
+  {
+    name: 'autoM Media',
+    niche: 'high-intent finance, SaaS, and digital growth',
+    tone: 'clear, analytical, practical',
+    visualStyle:
+      'financial charts, dashboard interfaces, software screens, marketing analytics, office workflows, smart desk setups, cinematic business b-roll',
+    promptDirectives:
+      'Lead with a practical hook, explain the tool or strategy simply, compare alternatives when helpful, keep claims specific and verifiable, and finish with a concrete payoff. Keep the script optimized for people searching for solutions, tutorials, comparisons, and buyer-intent questions. If finance appears, keep it tool-led or comparison-led and avoid advice or promises. Avoid empty hype, fearbait, fake urgency, legal drama, revenge framing, recap-style storytelling, and exaggerated promises.',
+    defaultHashtags: ['businesstools', 'saas', 'finance', 'automation', 'explained'],
+    callToActionStyle: 'affiliate',
+    callToActionTemplate: 'Follow for practical tool breakdowns and smarter business systems.',
+    callToActionGuardrails:
+      'Keep the CTA clear and useful. Do not promise financial outcomes or urgency.',
+  },
   {
     name: 'Stoic Wealth Shorts',
     niche: 'mindset and modern stoicism',
@@ -26,176 +55,192 @@ const UPGRADABLE_DEFAULT_PROFILE_SIGNATURES: DefaultProfileSignature[] = [
     visualStyle: 'high-contrast monochrome portraits, city architecture, deliberate movement',
     promptDirectives:
       'Keep each script practical, reflective, and specific. Avoid hype language and vague promises.',
-    preferredTopics: ['discipline', 'focus', 'self-command', 'money habits', 'decision making'],
-    bannedTopics: ['partisan politics', 'medical advice', 'get rich quick schemes'],
-    bannedTerms: ['guaranteed income', 'overnight success', 'secret loophole'],
-    defaultHashtags: ['stoicism', 'mindset', 'wealthhabits'],
+    defaultHashtags: ['stoicism', 'discipline', 'mindset', 'wealthhabits'],
     callToActionStyle: 'community',
-    callToActionTemplate: 'Follow for the next short lesson and save this idea for later.',
-    callToActionGuardrails:
-      'Keep the CTA short, calm, and non-pushy. Do not promise financial outcomes.',
-  },
-  {
-    name: 'autoM Media',
-    niche: 'tech tools and curiosity',
-    tone: 'clear, curious, practical',
-    visualStyle:
-      'clean product close-ups, futuristic interfaces, robotics labs, smart desks, cinematic technology b-roll',
-    promptDirectives:
-      'Lead with one surprising or useful point, explain the technology simply, keep claims specific and verifiable, and end with a practical takeaway. Avoid empty hype, fearbait, fake urgency, and exaggerated promises.',
-    preferredTopics: [
-      'AI tools that save time',
-      'budget creator gadgets',
-      'smart home upgrades',
-      'future tech breakthroughs',
-      'productivity apps',
-      'weird engineering ideas',
-    ],
-    bannedTopics: [
-      'partisan politics',
-      'medical advice',
-      'celebrity gossip',
-      'unverified breaking news',
-    ],
-    bannedTerms: [
-      'guaranteed income',
-      'overnight success',
-      'secret loophole',
-      'must-buy before it sells out',
-    ],
-    defaultHashtags: ['aitools', 'saas', 'automation', 'workflow'],
-    callToActionStyle: 'educational',
-    callToActionTemplate: 'Follow autoM Media for the next tool, workflow, or system worth trying.',
-    callToActionGuardrails:
-      'Keep the CTA short, honest, and product-led. Do not use fake urgency or promise personal, financial, or life-changing outcomes.',
-  },
-  {
-    name: 'autoM Media',
-    niche:
-      'Quantitative Finance & Trading: Focus on automated trading strategies, algorithmic crypto analysis, and wealth-building "blueprints". "Boring" AI & Productivity: Break down how AI is automating physical labor and technical services (e.g., AI in law, engineering, or real estate). Business Scandals & Case Studies: High-retention "mini-documentaries" on corporate failures or industry shifts (e.g., "The Death of Retail").',
-    tone:
-      'Objective: Stick to facts to build trust in high-value niches like finance. Analytical: Use a data-driven approach to stand out in the crowded "hype" tech space. Sophisticated: A refined, "premium" feel that attracts high-spending advertisers.',
-    visualStyle:
-      '3D Isometric Data Visualisations: Use clean, moving graphs to explain complex trends. Aesthetic Minimalist Tech: High-quality stock footage of sleek hardware and clean, organized workspaces. Archival Cinematic B-Roll: Mix historical business footage with modern, high-contrast technology clips.',
-    promptDirectives:
-      'Lead with an "Impossible" Stat: Start with a verifiable but shocking data point (e.g., "AI just cut legal labor costs by 70%"). The "Why it Matters" Pivot: Halfway through, pivot from what the tech is to how it affects the viewer\'s wallet or career. Practical Takeaway: Always end with a specific tool to try or a strategy to implement.',
-    preferredTopics: [
-      'Prop firm trading blueprints',
-      'Algorithmic crypto "whale" tracking',
-      'Automated options hedging strategies',
-      'Machine Learning for retail investors',
-      'Agentic AI in legal and medical discovery',
-      'AI-driven real estate valuation systems',
-      'Robotic labor in technical engineering trades',
-      'Workflow automation for white-collar firms',
-      'The collapse of high-profile fintech companies',
-      'Documentaries on industry-wide digital shifts',
-      'High-stakes algorithmic trading glitches',
-      'Corporate espionage in the Big Tech sector',
-    ],
-    bannedTopics: [
-      'partisan politics',
-      'medical advice',
-      'celebrity gossip',
-      'unverified breaking news',
-    ],
-    bannedTerms: [
-      'guaranteed income',
-      'overnight success',
-      'secret loophole',
-      'must-buy before it sells out',
-    ],
-    defaultHashtags: ['aitools', 'gadgets', 'futuretech'],
-    callToActionStyle: 'educational',
-    callToActionTemplate: 'Follow autoM Media for useful tech and the next idea worth knowing.',
-    callToActionGuardrails:
-      'Keep the CTA short, honest, and non-pushy. Do not use fake urgency or promise personal, financial, or life-changing outcomes.',
-  },
-  {
-    name: 'autoM Media',
-    niche:
-      'Quantitative Finance & Trading: Focus on automated trading strategies, algorithmic crypto analysis, and wealth-building "blueprints". "Boring" AI & Productivity: Break down how AI is automating physical labor and technical services (e.g., AI in law, engineering, or real estate). Business Scandals & Case Studies: High-retention "mini-documentaries" on corporate failures or industry shifts (e.g., "The Death of Retail").',
-    tone:
-      'Objective: Stick to facts to build trust in high-value niches like finance. Analytical: Use a data-driven approach to stand out in the crowded "hype" tech space. Sophisticated: A refined, "premium" feel that attracts high-spending advertisers.',
-    visualStyle:
-      '3D Isometric Data Visualisations: Use clean, moving graphs to explain complex trends. Aesthetic Minimalist Tech: High-quality stock footage of sleek hardware and clean, organized workspaces. Archival Cinematic B-Roll: Mix historical business footage with modern, high-contrast technology clips.',
-    promptDirectives:
-      'Lead with an "Impossible" Stat: Start with a verifiable but shocking data point (e.g., "AI just cut legal labor costs by 70%"). The "Why it Matters" Pivot: Halfway through, pivot from what the tech is to how it affects the viewer\'s wallet or career. Practical Takeaway: Always end with a specific tool to try or a strategy to implement.',
-    preferredTopics: [
-      'Prop firm trading blueprints',
-      'Algorithmic crypto "whale" tracking',
-      'Automated options hedging strategies',
-      'Machine Learning for retail investors',
-      'Agentic AI in legal and medical discovery',
-      'AI-driven real estate valuation systems',
-      'Robotic labor in technical engineering trades',
-      'Workflow automation for white-collar firms',
-      'The collapse of high-profile fintech companies',
-      'Documentaries on industry-wide digital shifts',
-      'High-stakes algorithmic trading glitches',
-      'Corporate espionage in the Big Tech sector',
-    ],
-    bannedTopics: [
-      'partisan politics',
-      'medical advice',
-      'celebrity gossip',
-      'unverified breaking news',
-    ],
-    bannedTerms: [
-      'guaranteed income',
-      'overnight success',
-      'secret loophole',
-      'must-buy before it sells out',
-    ],
-    defaultHashtags: ['aitools', 'gadgets', 'futuretech'],
-    callToActionStyle: 'community',
-    callToActionTemplate: 'Follow autoM Media for useful tech and the next idea worth knowing.',
-    callToActionGuardrails:
-      'Keep the CTA short, honest, and non-pushy. Do not use fake urgency or promise personal, financial, or life-changing outcomes.',
-  },
-  {
-    name: 'autoM Media',
-    niche:
-      'Quantitative Finance & Trading: Focus on automated trading strategies, algorithmic crypto analysis, and wealth-building "blueprints". "Boring" AI & Productivity: Break down how AI is automating physical labor and technical services (e.g., AI in law, engineering, or real estate). Business Scandals & Case Studies: High-retention "mini-documentaries" on corporate failures or industry shifts (e.g., "The Death of Retail").',
-    tone:
-      'Objective: Stick to facts to build trust in high-value niches like finance. Analytical: Use a data-driven approach to stand out in the crowded "hype" tech space. Sophisticated: A refined, "premium" feel that attracts high-spending advertisers.',
-    visualStyle:
-      '3D Isometric Data Visualisations: Use clean, moving graphs to explain complex trends. Aesthetic Minimalist Tech: High-quality stock footage of sleek hardware and clean, organized workspaces. Archival Cinematic B-Roll: Mix historical business footage with modern, high-contrast technology clips.',
-    promptDirectives:
-      'Lead with an "Impossible" Stat: Start with a verifiable but shocking data point (e.g., "AI just cut legal labor costs by 70%"). The "Why it Matters" Pivot: Halfway through, pivot from what the tech is to how it affects the viewer\'s wallet or career. Practical Takeaway: Always end with a specific tool to try or a strategy to implement.',
-    preferredTopics: [
-      'Prop firm trading blueprints',
-      'Algorithmic crypto "whale" tracking',
-      'Automated options hedging strategies',
-      'Machine Learning for retail investors',
-      'Agentic AI in legal and medical discovery',
-      'AI-driven real estate valuation systems',
-      'Robotic labor in technical engineering trades',
-      'Workflow automation for white-collar firms',
-      'The collapse of high-profile fintech companies',
-      'Documentaries on industry-wide digital shifts',
-      'High-stakes algorithmic trading glitches',
-      'Corporate espionage in the Big Tech sector',
-    ],
-    bannedTopics: [
-      'partisan politics',
-      'medical advice',
-      'celebrity gossip',
-      'unverified breaking news',
-    ],
-    bannedTerms: [
-      'guaranteed income',
-      'overnight success',
-      'secret loophole',
-      'must-buy before it sells out',
-    ],
-    defaultHashtags: ['aitools', 'gadgets', 'futuretech'],
-    callToActionStyle: 'educational',
-    callToActionTemplate: 'Follow autoM Media for useful tech and the next idea worth knowing.',
-    callToActionGuardrails:
-      'Keep the CTA short, honest, and non-pushy. Do not use fake urgency or promise personal, financial, or life-changing outcomes.',
+    callToActionTemplate: 'Follow for practical discipline, focus, and money habit lessons.',
+    callToActionGuardrails: 'Keep the CTA reflective, grounded, and free from urgency or promises.',
   },
 ];
+
+export function createDefaultContentCategories(): ContentCategory[] {
+  return [
+    {
+      id: 'business_tech_news',
+      label: 'Business & Tech News',
+      enabled: true,
+      goal: 'revenue',
+      platformFit: 'both',
+      countryTargets: [...PRIMARY_COUNTRIES, ...SECONDARY_COUNTRIES],
+      contentTypeBias: 'recent_news',
+      topicGenerationRules:
+        'Choose current stories around large tech companies, AI products, enterprise software, regulation with market impact, business moves, and platform shifts. Prefer stories with a clear winner, loser, surprise, or money implication.',
+      evidencePolicy:
+        'Use only current, source-backed stories with at least one credible publication and a concrete development.',
+      visualPolicy:
+        'Use exact company, executive, product, or event visuals first. Do not fall back to generic office stock unless the scene is commentary-only.',
+      lengthStrategy: {
+        minSeconds: 135,
+        maxSeconds: 270,
+        longformEligible: true,
+      },
+      hashtagStrategy:
+        'Use 2-3 business or tech category tags, then 1-2 company or product tags. Keep tags sharp and topical.',
+      searchLenses: ['technology news', 'business news', 'AI news', 'startup funding', 'earnings'],
+      exampleTopics: [
+        'Why a new AI launch matters for everyday users',
+        'The business move that changes a whole market',
+        'What a big earnings surprise really means',
+      ],
+    },
+    {
+      id: 'consumer_tech_and_ai',
+      label: 'Consumer Tech & AI',
+      enabled: true,
+      goal: 'revenue',
+      platformFit: 'both',
+      countryTargets: [...PRIMARY_COUNTRIES],
+      contentTypeBias: 'product_or_tool_demo',
+      topicGenerationRules:
+        'Focus on useful products, AI tools, platform updates, creator tools, or app shifts that change how people work or create.',
+      evidencePolicy:
+        'Prefer first-party announcements, product pages, current demos, and credible reporting.',
+      visualPolicy:
+        'Use exact product, app, interface, or device visuals before generic stock. Demo-style visuals are preferred.',
+      lengthStrategy: {
+        minSeconds: 135,
+        maxSeconds: 240,
+        longformEligible: true,
+      },
+      hashtagStrategy:
+        'Use 2 category tags, 1-2 product tags, and optionally one trend tag if the topic is timely.',
+      searchLenses: ['AI tools', 'consumer tech', 'app update', 'creator tools', 'product launch'],
+      exampleTopics: [
+        'The AI tool that quietly removes a painful workflow',
+        'The consumer app update people are underestimating',
+        'The device or feature that actually changes behavior',
+      ],
+    },
+    {
+      id: 'money_work_and_tools',
+      label: 'Money, Work & Tools',
+      enabled: true,
+      goal: 'revenue',
+      platformFit: 'both',
+      countryTargets: [...PRIMARY_COUNTRIES],
+      contentTypeBias: 'product_or_tool_demo',
+      topicGenerationRules:
+        'Pick tools, systems, comparisons, and work upgrades that solve real money or productivity pain without giving personal financial advice.',
+      evidencePolicy:
+        'Use source-backed tool details, pricing, product comparisons, or concrete use cases. Avoid unsupported promises.',
+      visualPolicy:
+        'Favor exact tools, screens, dashboards, calculators, or workflow visuals over generic office stock.',
+      lengthStrategy: {
+        minSeconds: 150,
+        maxSeconds: 300,
+        longformEligible: true,
+      },
+      hashtagStrategy:
+        'Use 2 practical category tags and 1-2 tool or use-case tags. Skip generic hype tags.',
+      searchLenses: [
+        'business tools',
+        'productivity tools',
+        'finance tools',
+        'automation software',
+      ],
+      exampleTopics: [
+        'The workflow tool that actually cuts admin work',
+        'The money tool that makes one decision easier',
+        'The software comparison worth watching this year',
+      ],
+    },
+    {
+      id: 'big_explainers_and_current_affairs',
+      label: 'Big Explainers & Current Affairs',
+      enabled: true,
+      goal: 'hybrid',
+      platformFit: 'meta',
+      countryTargets: [...PRIMARY_COUNTRIES, ...SECONDARY_COUNTRIES],
+      contentTypeBias: 'recent_news',
+      topicGenerationRules:
+        'Pick major current events that can be explained clearly, especially stories with global impact, policy shifts, technology consequences, or business implications.',
+      evidencePolicy:
+        'Require multiple credible sources and clear factual grounding. Skip weakly sourced or purely partisan stories.',
+      visualPolicy:
+        'Use exact place, institution, person, or event visuals first. Generic stock is only acceptable for abstract commentary scenes.',
+      lengthStrategy: {
+        minSeconds: 150,
+        maxSeconds: 300,
+        longformEligible: true,
+      },
+      hashtagStrategy:
+        'Use 1-2 explainer tags, 1 current-event tag, and entity tags when they are specific and relevant.',
+      searchLenses: ['world news', 'current affairs', 'policy update', 'global business impact'],
+      exampleTopics: [
+        'The world event everyone is hearing about but not understanding',
+        'The policy move with a real business ripple effect',
+      ],
+    },
+    {
+      id: 'history_people_and_power',
+      label: 'History, People & Power',
+      enabled: true,
+      goal: 'authority',
+      platformFit: 'meta',
+      countryTargets: [...PRIMARY_COUNTRIES, ...SECONDARY_COUNTRIES],
+      contentTypeBias: 'historical_topic',
+      topicGenerationRules:
+        'Choose history or biography topics only when there is a vivid hook, a reveal, a turning point, or a surprising consequence.',
+      evidencePolicy:
+        'Require strong factual grounding and exact visual availability for the key person, place, or event.',
+      visualPolicy:
+        'Use exact archival or entity visuals first. Reject scenes that would fall back to generic stock instead of the real subject.',
+      lengthStrategy: {
+        minSeconds: 135,
+        maxSeconds: 270,
+        longformEligible: false,
+      },
+      hashtagStrategy: 'Use 1-2 history tags plus the exact person, place, or event when relevant.',
+      searchLenses: [
+        'history explained',
+        'historical figure',
+        'archival story',
+        'power and leadership history',
+      ],
+      exampleTopics: [
+        'The historical decision that changed everything after it looked settled',
+        'The leader everyone mentions but few explain correctly',
+      ],
+    },
+    {
+      id: 'practical_life_and_work_tips',
+      label: 'Practical Life & Work Tips',
+      enabled: true,
+      goal: 'reach',
+      platformFit: 'meta',
+      countryTargets: [...PRIMARY_COUNTRIES],
+      contentTypeBias: 'generic_business_or_lifestyle',
+      topicGenerationRules:
+        'Choose practical systems, habits, work tips, decision shortcuts, and everyday improvements with a specific payoff.',
+      evidencePolicy:
+        'Generic evergreen tips are acceptable if they stay concrete and avoid fake authority.',
+      visualPolicy:
+        'Use relevant stock, product, or activity visuals that match the exact action being described.',
+      lengthStrategy: {
+        minSeconds: 135,
+        maxSeconds: 240,
+        longformEligible: false,
+      },
+      hashtagStrategy:
+        'Use 2 practical category tags and 1-2 exact action or workflow tags. Keep the set compact.',
+      searchLenses: ['work tips', 'productivity habits', 'decision making', 'life systems'],
+      exampleTopics: [
+        'The small workflow fix that saves hours over a month',
+        'The habit shift that changes work quality fast',
+        'The practical system that stops repeat mistakes',
+      ],
+    },
+  ];
+}
 
 export function createDefaultProfile(
   targetPlatforms: ContentProfile['targetPlatforms'] = ['local']
@@ -205,51 +250,32 @@ export function createDefaultProfile(
   return {
     id: 'profile_default',
     name: 'autoM Media',
-    niche: 'high-intent finance, SaaS, and digital growth',
-    tone: 'clear, analytical, practical',
+    niche:
+      'meta-first explainers for business, technology, current affairs, history, and practical life/work topics',
+    tone: 'clear, conversational, vivid, and human',
     visualStyle:
-      'financial charts, dashboard interfaces, software screens, marketing analytics, office workflows, smart desk setups, cinematic business b-roll',
+      'relevant factual visuals, archival imagery, real-world footage, clean product visuals, and simple editorial graphics',
     promptDirectives:
-      'Lead with a practical hook, explain the tool or strategy simply, compare alternatives when helpful, keep claims specific and verifiable, and finish with a concrete payoff. Keep the script optimized for people searching for solutions, tutorials, comparisons, and buyer-intent questions. If finance appears, keep it tool-led or comparison-led and avoid advice or promises. Avoid empty hype, fearbait, fake urgency, legal drama, revenge framing, recap-style storytelling, and exaggerated promises.',
-    preferredTopics: [
-      'Best CRM for 2026',
-      'AI workflow automation',
-      'SEO and programmatic SEO guides',
-      'AI tool tutorials',
-      'Paid ad scaling systems',
-      'Tax strategy software',
-      'Retirement planning tools',
-      'Real estate investing tools',
-      'High-ticket affiliate software reviews',
-      'B2B SaaS comparisons',
-    ],
-    bannedTopics: [
-      'partisan politics',
-      'medical advice',
-      'celebrity gossip',
-      'unverified breaking news',
-      'legal drama',
-      'revenge stories',
-      'manhwa recaps',
-      'webtoon recaps',
-    ],
-    bannedTerms: [
-      'guaranteed income',
-      'overnight success',
-      'secret loophole',
-      'must-buy before it sells out',
-      'easy money',
-    ],
-    sceneCount: 6,
-    maxDurationSeconds: 90,
-    defaultHashtags: ['finance', 'saas', 'automation', 'seo'],
-    callToActionStyle: 'educational',
-    callToActionTemplate: 'Follow autoM Media for the next tool, strategy, or comparison worth knowing.',
+      'Choose the most interesting concrete angle under the selected category, not the safest generic summary. Open with a real hook, escalate scene by scene, stay factual, and use highly specific visual search queries that describe the exact person, object, place, event, app, or activity on screen.',
+    contentCategories: createDefaultContentCategories(),
+    sceneCount: 0,
+    maxDurationSeconds: 180,
+    defaultHashtags: ['explained', 'news', 'tech', 'business'],
+    callToActionStyle: 'community',
+    callToActionTemplate:
+      'Follow for sharper explainers on the stories, people, and tools worth knowing.',
     callToActionGuardrails:
-      'Keep the CTA short, honest, and product-led. Do not use fake urgency or promise personal, financial, or life-changing outcomes.',
+      'Keep the CTA short, natural, and curiosity-led. No fake urgency or exaggerated promises.',
     affiliateLinkTemplate: '',
     requireAffiliateDisclosure: false,
     affiliateDisclosureTemplate: '',
+    contentMode: 'narration',
+    topicSource: 'category_pool',
+    dialogueCharacterPresetId: 'studio_duo_v2',
+    dialogueHostAName: 'Maya',
+    dialogueHostBName: 'Theo',
+    dialogueVoiceA: 'aura-2-thalia-en',
+    dialogueVoiceB: 'aura-2-orion-en',
     enabled: true,
     scheduleCron: '0 8 * * *',
     targetPlatforms: [...targetPlatforms],
@@ -260,12 +286,25 @@ export function createDefaultProfile(
 }
 
 export function isLegacyDefaultProfile(profile: ContentProfile): boolean {
-  return (
-    profile.id === 'profile_default' &&
-    UPGRADABLE_DEFAULT_PROFILE_SIGNATURES.some((signature) =>
-      matchesDefaultProfileSignature(profile, signature)
-    )
+  return UPGRADABLE_DEFAULT_PROFILE_SIGNATURES.some((signature) =>
+    matchesSignature(profile, signature)
   );
+}
+
+export function shouldRefreshDefaultProfile(profile: ContentProfile): boolean {
+  if (isLegacyDefaultProfile(profile)) {
+    return true;
+  }
+
+  if (
+    profile.id === 'profile_default' &&
+    (profile.niche === 'high-intent finance, SaaS, and digital growth' ||
+      profile.niche === 'mindset and modern stoicism')
+  ) {
+    return true;
+  }
+
+  return profile.id === 'profile_default' && profile.name === 'autoM History';
 }
 
 export function migrateLegacyDefaultProfile(
@@ -285,26 +324,20 @@ export function migrateLegacyDefaultProfile(
   };
 }
 
-function sameStringList(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function matchesDefaultProfileSignature(
-  profile: ContentProfile,
-  signature: DefaultProfileSignature
-): boolean {
+function matchesSignature(profile: ContentProfile, signature: DefaultProfileSignature): boolean {
   return (
     profile.name === signature.name &&
     profile.niche === signature.niche &&
     profile.tone === signature.tone &&
     profile.visualStyle === signature.visualStyle &&
     profile.promptDirectives === signature.promptDirectives &&
-    sameStringList(profile.preferredTopics, signature.preferredTopics) &&
-    sameStringList(profile.bannedTopics, signature.bannedTopics) &&
-    sameStringList(profile.bannedTerms, signature.bannedTerms) &&
-    sameStringList(profile.defaultHashtags, signature.defaultHashtags) &&
+    arraysEqual(profile.defaultHashtags, signature.defaultHashtags) &&
     profile.callToActionStyle === signature.callToActionStyle &&
     profile.callToActionTemplate === signature.callToActionTemplate &&
     profile.callToActionGuardrails === signature.callToActionGuardrails
   );
+}
+
+function arraysEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }

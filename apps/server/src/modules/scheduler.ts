@@ -4,9 +4,16 @@ import type { AppEnv } from '@autom/config';
 import type { ContentProfile, SchedulerOverview, SchedulerRun } from '@autom/contracts';
 import { SchedulerOverviewSchema } from '@autom/contracts';
 
+import {
+  buildCategoryTopicCandidates,
+  buildTopicSelectionSeed,
+  chooseCategory,
+  chooseTopicCandidate,
+} from '../lib/content-strategy.js';
 import { normalizeCronExpression } from '../lib/cron.js';
 import { AppError } from '../lib/errors.js';
 import { isRetryableFailureMessage } from '../lib/failure.js';
+import type { NewsProvider } from '../lib/types.js';
 import type { AppRepository } from '../repositories/app-repository.js';
 import type { AuditService } from './audit.js';
 import type { ProfilesService } from './profiles.js';
@@ -25,7 +32,8 @@ export class SchedulerService {
     private readonly repository: AppRepository,
     private readonly profilesService: ProfilesService,
     private readonly workflowService: WorkflowService,
-    private readonly auditService: AuditService
+    private readonly auditService: AuditService,
+    private readonly newsProvider: NewsProvider
   ) {}
 
   start(): void {
@@ -78,6 +86,34 @@ export class SchedulerService {
     });
   }
 
+  cancelRun(runId: string): SchedulerRun {
+    const run = this.repository.getSchedulerRun(runId);
+    if (!run) {
+      throw new AppError(404, `Scheduler run ${runId} not found.`);
+    }
+
+    if (run.status === 'cancelled') {
+      return run;
+    }
+
+    if (!['queued', 'retry_scheduled'].includes(run.status)) {
+      throw new AppError(
+        409,
+        `Scheduler run ${runId} cannot be cancelled from ${run.status} status.`
+      );
+    }
+
+    const cancelled = this.repository.cancelSchedulerRun(
+      runId,
+      'Cancelled by operator before execution.'
+    );
+    this.auditService.info(
+      null,
+      `Scheduler run ${runId} for topic "${run.topic}" was cancelled from the ops console.`
+    );
+    return cancelled ?? run;
+  }
+
   private scheduleNextTick(delayMs: number): void {
     if (!this.started) {
       return;
@@ -104,7 +140,7 @@ export class SchedulerService {
     let failedCount = 0;
 
     try {
-      queuedCount = this.queueDueRuns(at, state.lastTickCompletedAt);
+      queuedCount = await this.queueDueRuns(at, state.lastTickCompletedAt);
       const dueRuns = this.repository.listDueSchedulerRuns(at.toISOString(), MAX_RUNS_PER_TICK);
 
       for (const run of dueRuns) {
@@ -135,7 +171,7 @@ export class SchedulerService {
     return this.getOverview();
   }
 
-  private queueDueRuns(now: Date, lastTickCompletedAt: string | null): number {
+  private async queueDueRuns(now: Date, lastTickCompletedAt: string | null): Promise<number> {
     const profiles = this.profilesService.list().filter((profile) => profile.enabled);
     let created = 0;
 
@@ -162,10 +198,11 @@ export class SchedulerService {
       }
 
       for (const slot of dueSlots) {
+        const topic = await this.resolveScheduledTopic(profile, slot);
         const result = this.repository.ensureSchedulerRun({
           profileId: profile.id,
           scheduledFor: slot.toISOString(),
-          topic: buildScheduledTopic(profile, slot),
+          topic,
           maxAttempts: this.env.SCHEDULER_MAX_RETRIES,
         });
 
@@ -231,15 +268,6 @@ export class SchedulerService {
         topic: run.topic,
       });
 
-      if (job.status === 'waiting_for_manual_clip') {
-        this.repository.completeSchedulerRun(run.id, job.id);
-        this.auditService.info(
-          job.id,
-          `Scheduled run ${run.id} paused for manual clip upload and will continue later.`
-        );
-        return 'completed';
-      }
-
       if (job.status === 'review_pending') {
         this.repository.completeSchedulerRun(run.id, job.id);
         this.auditService.info(
@@ -292,24 +320,59 @@ export class SchedulerService {
     );
     return 'retry';
   }
-}
 
-function buildScheduledTopic(profile: ContentProfile, scheduledFor: Date): string {
-  const topicPool = profile.preferredTopics.length > 0 ? profile.preferredTopics : [profile.niche];
-  const seed = `${profile.id}:${scheduledFor.toISOString()}`;
-  const index = Math.abs(hashString(seed)) % topicPool.length;
-  return topicPool[index] ?? profile.niche;
-}
+  private async resolveScheduledTopic(
+    profile: ContentProfile,
+    scheduledFor: Date
+  ): Promise<string> {
+    const category = chooseCategory(profile, buildTopicSelectionSeed(profile, scheduledFor));
 
-function hashString(value: string): number {
-  let hash = 0;
+    if (profile.topicSource !== 'daily_news') {
+      const topicSeed = buildTopicSelectionSeed(profile, scheduledFor);
+      const candidate = chooseTopicCandidate(
+        buildCategoryTopicCandidates(
+          profile,
+          category,
+          null,
+          topicSeed
+        ),
+        `${topicSeed}:candidate`
+      );
+      return candidate?.title ?? profile.niche;
+    }
 
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(index);
-    hash |= 0;
+    try {
+      const newsTopic = await this.newsProvider.discoverTopic(profile, scheduledFor);
+      if (newsTopic?.title) {
+        this.auditService.info(
+          null,
+          `News topic selected for ${profile.id}: "${newsTopic.title}"${
+            newsTopic.sourceName ? ` via ${newsTopic.sourceName}` : ''
+          }.`
+        );
+        return newsTopic.title;
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown news topic resolution failure.';
+      this.auditService.warn(
+        null,
+        `Daily news topic lookup failed for ${profile.id}; falling back to category seeds. ${message}`
+      );
+    }
+
+    const fallbackSeed = buildTopicSelectionSeed(profile, scheduledFor);
+    const fallbackCandidate = chooseTopicCandidate(
+      buildCategoryTopicCandidates(
+        profile,
+        category,
+        null,
+        fallbackSeed
+      ),
+      `${fallbackSeed}:candidate`
+    );
+    return fallbackCandidate?.title ?? profile.niche;
   }
-
-  return hash;
 }
 
 function resolveSchedulerStartAt(

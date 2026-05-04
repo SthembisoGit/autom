@@ -2,15 +2,25 @@ import type { AppEnv, RuntimePaths } from '@autom/config';
 import type { CreateJobRequest, GenerationJob } from '@autom/contracts';
 
 import { cleanupJobArtifacts } from '../lib/artifacts.js';
-import { badRequest, conflict, notFound } from '../lib/errors.js';
-import {
-  buildManualClipAssetReferences,
-  buildManualClipBundle,
-} from '../lib/manual-clips.js';
-import type { MediaRenderer, ScriptProvider, VisualProvider, VoiceProvider } from '../lib/types.js';
+import { conflict, notFound } from '../lib/errors.js';
+import { WARNING_CODE, readWarningCode } from '../lib/warning-codes.js';
+import type {
+  MediaRenderer,
+  ScriptProvider,
+  TranscriptionProvider,
+  VisualProvider,
+  VoiceProvider,
+} from '../lib/types.js';
 import type { AppRepository } from '../repositories/app-repository.js';
 import type { AuditService } from './audit.js';
 import type { ProfilesService } from './profiles.js';
+
+class OperatorCancelledError extends Error {
+  constructor(message = 'Cancelled by operator.') {
+    super(message);
+    this.name = 'OperatorCancelledError';
+  }
+}
 
 export class WorkflowService {
   constructor(
@@ -21,6 +31,7 @@ export class WorkflowService {
     private readonly auditService: AuditService,
     private readonly scriptProvider: ScriptProvider,
     private readonly voiceProvider: VoiceProvider,
+    private readonly transcriptionProvider: TranscriptionProvider,
     private readonly visualProvider: VisualProvider,
     private readonly mediaRenderer: MediaRenderer
   ) {}
@@ -29,11 +40,6 @@ export class WorkflowService {
     const profile = this.profilesService.get(input.profileId);
     if (!profile) {
       throw notFound(`Profile ${input.profileId} not found.`);
-    }
-
-    const policyViolation = this.profilesService.topicViolatesPolicy(profile, input.topic);
-    if (policyViolation) {
-      throw badRequest(`Requested topic violates profile policy. ${policyViolation}`);
     }
 
     const duplicateJob = this.repository.findActiveJob(profile.id, input.topic);
@@ -49,6 +55,7 @@ export class WorkflowService {
     this.auditService.info(job.id, `Job created for topic "${input.topic}".`);
 
     try {
+      this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Script generation started.');
       const { scriptPackage, scriptMetadata } = await this.scriptProvider.generate(
         profile,
@@ -64,6 +71,19 @@ export class WorkflowService {
         job.id,
         `Script package created via ${scriptMetadata.provider} (${scriptMetadata.mode}) using prompt ${scriptMetadata.promptVersion}.`
       );
+      this.auditService.info(
+        job.id,
+        `Research stack: search=${scriptMetadata.searchProvider}, rerank=${scriptMetadata.rerankProvider}, evidence=${scriptMetadata.evidenceSourceCount}, verification=${scriptMetadata.verificationStatus}.`
+      );
+      if (this.env.GEMINI_API_KEY && scriptMetadata.provider !== 'gemini') {
+        this.auditService.warn(
+          job.id,
+          `Primary Gemini script generation fell back to ${scriptMetadata.provider}.`
+        );
+      }
+      for (const warning of scriptMetadata.warnings) {
+        this.auditService.warn(job.id, warning);
+      }
       if (scriptMetadata.repaired || scriptMetadata.attemptCount > 1) {
         this.auditService.warn(
           job.id,
@@ -73,27 +93,7 @@ export class WorkflowService {
         );
       }
 
-      const manualClipBundle = buildManualClipBundle(
-        profile,
-        scriptPackage,
-        this.env.MANUAL_CLIP_WAIT_SECONDS
-      );
-
-      if (manualClipBundle) {
-        const pausedJob = this.repository.updateJob({
-          ...workingJob,
-          status: 'waiting_for_manual_clip',
-          manualClipBundle,
-          errorMessage: null,
-        });
-        const requestedScenes = manualClipBundle.requests.map((request) => request.sceneOrder).join(', ');
-        this.auditService.info(
-          job.id,
-          `Manual clip upload requested for scene${manualClipBundle.requests.length === 1 ? '' : 's'} ${requestedScenes}.`
-        );
-        return pausedJob;
-      }
-
+      this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Narration synthesis started.');
       const narrationResult = await this.voiceProvider.synthesize(
         scriptPackage,
@@ -111,6 +111,26 @@ export class WorkflowService {
         this.auditService.warn(job.id, warning);
       }
 
+      this.assertNotCancelled(job.id);
+      this.auditService.info(job.id, 'Subtitle timing transcription started.');
+      const transcriptResult = await this.transcriptionProvider.transcribe({
+        scriptPackage,
+        profile,
+        jobId: job.id,
+        runtimePaths: this.runtimePaths,
+        narrationPath: narrationResult.narrationPath,
+      });
+      this.auditService.info(
+        job.id,
+        transcriptResult.transcriptWords
+          ? `Transcript timing captured with ${transcriptResult.transcriptWords.length} word timestamps.`
+          : 'Transcript timing unavailable; renderer will use fallback subtitle timing.'
+      );
+      for (const warning of transcriptResult.warnings) {
+        this.auditService.warn(job.id, warning);
+      }
+
+      this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Visual selection started.');
       const visualSelection = await this.visualProvider.select({
         scriptPackage,
@@ -122,7 +142,18 @@ export class WorkflowService {
       for (const warning of visualSelection.warnings) {
         this.auditService.warn(job.id, warning);
       }
+      const unresolvedFactualVisuals = visualSelection.warnings.filter((warning) =>
+        readWarningCode(warning) === WARNING_CODE.VISUAL_EXACT_NOT_FOUND ||
+        /could not find an exact factual visual match/i.test(warning)
+      );
+      if (unresolvedFactualVisuals.length > 0) {
+        this.auditService.warn(
+          job.id,
+          `[${WARNING_CODE.VISUAL_EXACT_NOT_FOUND}] Visual selection missed exact factual media for ${unresolvedFactualVisuals.length} scene(s); proceeding with degraded visuals.`
+        );
+      }
 
+      this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Render assembly started.');
       const reviewPackage = await this.mediaRenderer.render({
         env: this.env,
@@ -130,133 +161,72 @@ export class WorkflowService {
         job,
         scriptPackage,
         selectedVisualQueries: visualSelection.selectedVisualQueries,
-        assetReferences: [...narrationResult.assetReferences, ...visualSelection.assetReferences],
-        warnings: [...narrationResult.warnings, ...visualSelection.warnings],
+        assetReferences: [
+          ...narrationResult.assetReferences,
+          ...transcriptResult.assetReferences,
+          ...visualSelection.assetReferences,
+        ],
+        warnings: [
+          ...narrationResult.warnings,
+          ...transcriptResult.warnings,
+          ...visualSelection.warnings,
+        ],
         narrationPath: narrationResult.narrationPath,
         sceneNarrationTimeline: narrationResult.sceneNarrationTimeline ?? null,
+        dialogueTurnTimeline: narrationResult.dialogueTurnTimeline ?? null,
+        transcriptWords: transcriptResult.transcriptWords ?? null,
+        contentMode: profile.contentMode,
         runtimePaths: this.runtimePaths,
         onProgress: (message) => {
           this.auditService.info(job.id, message);
         },
       });
+      const reviewPackageWithSelectionOutcomes = {
+        ...reviewPackage,
+        visualSelectionOutcomes: visualSelection.visualSelectionOutcomes,
+      };
       this.auditService.info(job.id, 'Review package rendered.');
+      this.assertNotCancelled(job.id);
 
       return this.repository.updateJob({
         ...workingJob,
         status: 'review_pending',
-        reviewPackage,
+        manualClipBundle: null,
+        reviewPackage: reviewPackageWithSelectionOutcomes,
         errorMessage: null,
       });
     } catch (error) {
+      if (error instanceof OperatorCancelledError) {
+        await cleanupJobArtifacts(this.runtimePaths, job.id);
+        this.auditService.info(job.id, 'Cancellation completed. Run marked as cancelled.');
+        return this.repository.updateJob({
+          ...workingJob,
+          status: 'cancelled',
+          manualClipBundle: null,
+          errorMessage: error.message,
+        });
+      }
+
       const message = error instanceof Error ? error.message : 'Unknown workflow error.';
       await cleanupJobArtifacts(this.runtimePaths, job.id);
       this.auditService.error(job.id, message);
       return this.repository.updateJob({
         ...workingJob,
         status: 'failed',
+        manualClipBundle: null,
         errorMessage: message,
       });
     }
   }
 
-  async resumeManualClipJob(jobId: string): Promise<GenerationJob> {
-    const job = this.repository.getJob(jobId);
-    if (!job) {
-      throw notFound(`Job ${jobId} not found.`);
+  private assertNotCancelled(jobId: string): void {
+    const current = this.repository.getJob(jobId);
+    if (!current) {
+      throw new OperatorCancelledError();
     }
 
-    const resumedJob =
-      job.status === 'drafting'
-        ? job
-        : this.repository.updateJob({
-            ...job,
-            status: 'drafting',
-            errorMessage: null,
-          });
-
-    try {
-      const profile = this.profilesService.get(job.profileId);
-      if (!profile) {
-        throw notFound(`Profile ${job.profileId} not found.`);
-      }
-
-      if (!job.scriptPackage || !job.scriptMetadata || !job.manualClipBundle) {
-        throw conflict(`Job ${jobId} cannot resume without script and manual clip data.`);
-      }
-
-      this.auditService.info(job.id, 'Manual clip assets accepted. Resuming workflow.');
-      const uploadedManualClips = buildManualClipAssetReferences(resumedJob);
-      const uploadedSceneOrders = uploadedManualClips
-        .map((reference) => reference.sceneOrder)
-        .filter((value): value is number => value !== null);
-
-      this.auditService.info(job.id, 'Narration synthesis resumed after manual clip upload.');
-      const narrationResult = await this.voiceProvider.synthesize(
-        job.scriptPackage,
-        profile,
-        job.id,
-        this.runtimePaths
-      );
-      this.auditService.info(
-        job.id,
-        narrationResult.narrationPath
-          ? 'Narration asset created.'
-          : 'Narration skipped or deferred.'
-      );
-      for (const warning of narrationResult.warnings) {
-        this.auditService.warn(job.id, warning);
-      }
-
-      this.auditService.info(job.id, 'Visual selection resumed.');
-      const visualSelection = await this.visualProvider.select({
-        scriptPackage: job.scriptPackage,
-        profile,
-        jobId: job.id,
-        runtimePaths: this.runtimePaths,
-        excludeSceneOrders: uploadedSceneOrders,
-      });
-      this.auditService.info(job.id, 'Visual selection completed.');
-      for (const warning of visualSelection.warnings) {
-        this.auditService.warn(job.id, warning);
-      }
-
-      this.auditService.info(job.id, 'Render assembly resumed.');
-      const reviewPackage = await this.mediaRenderer.render({
-        env: this.env,
-        profile,
-        job: resumedJob,
-        scriptPackage: job.scriptPackage,
-        selectedVisualQueries: visualSelection.selectedVisualQueries,
-        assetReferences: [
-          ...narrationResult.assetReferences,
-          ...uploadedManualClips,
-          ...visualSelection.assetReferences,
-        ],
-        warnings: [...narrationResult.warnings, ...visualSelection.warnings],
-        narrationPath: narrationResult.narrationPath,
-        sceneNarrationTimeline: narrationResult.sceneNarrationTimeline ?? null,
-        runtimePaths: this.runtimePaths,
-        onProgress: (message) => {
-          this.auditService.info(job.id, message);
-        },
-      });
-      this.auditService.info(job.id, 'Review package rendered.');
-
-      return this.repository.updateJob({
-        ...resumedJob,
-        status: 'review_pending',
-        reviewPackage,
-        errorMessage: null,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown workflow error.';
-      await cleanupJobArtifacts(this.runtimePaths, job.id);
-      this.auditService.error(job.id, message);
-      return this.repository.updateJob({
-        ...resumedJob,
-        status: 'failed',
-        errorMessage: message,
-      });
+    if (current.status === 'cancelling' || current.status === 'cancelled') {
+      throw new OperatorCancelledError();
     }
   }
 }

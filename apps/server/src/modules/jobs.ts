@@ -12,6 +12,7 @@ import {
   deriveJobProgress,
   hasPendingPublicationWork,
 } from '../lib/job-progress.js';
+import { nowIso } from '../lib/time.js';
 import type { AppRepository } from '../repositories/app-repository.js';
 import type { AuditService } from './audit.js';
 import type { WorkflowService } from './workflow.js';
@@ -44,9 +45,10 @@ export class JobsService {
   getMonitor(): JobMonitorResponse {
     const jobs = this.repository.listJobs();
     const active = jobs
-      .filter((job) =>
-        ['drafting', 'waiting_for_manual_clip', 'review_pending', 'approved'].includes(job.status) ||
-        (job.status === 'publish_pending' && hasPendingPublicationWork(job.publicationResults))
+      .filter(
+        (job) =>
+          ['drafting', 'cancelling', 'review_pending', 'approved'].includes(job.status) ||
+          (job.status === 'publish_pending' && hasPendingPublicationWork(job.publicationResults))
       )
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .slice(0, 8)
@@ -93,5 +95,69 @@ export class JobsService {
     });
     this.auditService.info(jobId, `Retry started as job ${retryJob.id}.`);
     return retryJob;
+  }
+
+  cancel(jobId: string): GenerationJob {
+    const job = this.repository.getJob(jobId);
+    if (!job) {
+      throw notFound(`Job ${jobId} not found.`);
+    }
+
+    if (job.status === 'cancelling' || job.status === 'cancelled') {
+      return job;
+    }
+
+    if (job.status === 'drafting') {
+      this.auditService.warn(
+        jobId,
+        'Cancel requested. The run will stop after the current safe step.'
+      );
+      return this.repository.updateJob({
+        ...job,
+        status: 'cancelling',
+        errorMessage: 'Cancel requested by operator.',
+        updatedAt: nowIso(),
+      });
+    }
+
+    if (job.status === 'publish_pending') {
+      this.auditService.warn(
+        jobId,
+        'Cancel requested. Further publication work will stop and the run is being closed.'
+      );
+      this.auditService.info(jobId, 'Cancellation completed. Run marked as cancelled.');
+      return this.repository.updateJob({
+        ...job,
+        status: 'cancelled',
+        errorMessage: 'Cancelled by operator.',
+        updatedAt: nowIso(),
+      });
+    }
+
+    throw conflict(`Job ${jobId} cannot be cancelled from ${job.status} status.`);
+  }
+
+  archive(jobId: string): GenerationJob {
+    const job = this.repository.getJob(jobId);
+    if (!job) {
+      throw notFound(`Job ${jobId} not found.`);
+    }
+
+    if (job.archivedAt) {
+      return job;
+    }
+
+    if (!['failed', 'published', 'cancelled'].includes(job.status)) {
+      throw conflict(`Job ${jobId} can only be removed from lists after it is finished.`);
+    }
+
+    this.auditService.info(jobId, 'Archive requested from ops console.');
+    this.auditService.info(jobId, 'Run archived from normal ops views.');
+    return this.repository.updateJob({
+      ...job,
+      archivedAt: nowIso(),
+      archivedReason: 'Archived from ops console.',
+      updatedAt: nowIso(),
+    });
   }
 }

@@ -141,6 +141,8 @@ function createRunDetail(): JobDetailResponse {
         },
       ],
       errorMessage: null,
+      archivedAt: null,
+      archivedReason: null,
       createdAt: '2026-03-18T11:55:00.000Z',
       updatedAt: '2026-03-18T12:11:00.000Z',
     },

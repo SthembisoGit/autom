@@ -15,8 +15,8 @@ import {
   AuditEventSchema,
   ContentProfileSchema,
   DashboardSummarySchema,
-  ManualClipBundleSchema,
   GenerationJobSchema,
+  ManualClipBundleSchema,
   ReviewPackageSchema,
   SchedulerRunSchema,
   ScriptGenerationMetadataSchema,
@@ -37,6 +37,8 @@ type JobRecord = {
   review_json: string | null;
   publication_json: string;
   error_message: string | null;
+  archived_at: string | null;
+  archived_reason: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -139,6 +141,8 @@ export class AppRepository {
       reviewPackage: null,
       publicationResults: [],
       errorMessage: null,
+      archivedAt: null,
+      archivedReason: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -154,9 +158,10 @@ export class AppRepository {
           SELECT * FROM jobs
           WHERE profile_id = ?
             AND lower(trim(topic)) = lower(trim(?))
+            AND archived_at IS NULL
             AND status IN (
               'drafting',
-              'waiting_for_manual_clip',
+              'cancelling',
               'review_pending',
               'approved',
               'publish_pending'
@@ -188,7 +193,7 @@ export class AppRepository {
 
   listJobs(): GenerationJob[] {
     const rows = this.database.connection
-      .prepare('SELECT * FROM jobs ORDER BY created_at DESC')
+      .prepare('SELECT * FROM jobs WHERE archived_at IS NULL ORDER BY created_at DESC')
       .all() as JobRecord[];
     return rows.map((row) => this.mapJob(row));
   }
@@ -198,6 +203,7 @@ export class AppRepository {
       .prepare(`
         SELECT * FROM jobs
         WHERE status IN ('review_pending', 'approved', 'publish_pending')
+          AND archived_at IS NULL
         ORDER BY updated_at DESC
       `)
       .all() as JobRecord[];
@@ -208,7 +214,8 @@ export class AppRepository {
     const rows = this.database.connection
       .prepare(`
         SELECT * FROM jobs
-        WHERE status IN ('published', 'publish_pending', 'failed')
+        WHERE status IN ('published', 'publish_pending', 'failed', 'cancelled')
+          AND archived_at IS NULL
         ORDER BY updated_at DESC
       `)
       .all() as JobRecord[];
@@ -282,9 +289,7 @@ export class AppRepository {
     return DashboardSummarySchema.parse({
       totalProfiles: profiles.length,
       enabledProfiles: profiles.filter((profile) => profile.enabled).length,
-      draftJobs: jobs.filter(
-        (job) => job.status === 'drafting' || job.status === 'waiting_for_manual_clip'
-      ).length,
+      draftJobs: jobs.filter((job) => job.status === 'drafting').length,
       reviewPendingJobs: jobs.filter((job) => job.status === 'review_pending').length,
       publishedJobs: jobs.filter((job) => job.status === 'published').length,
     });
@@ -602,6 +607,15 @@ export class AppRepository {
     });
   }
 
+  cancelSchedulerRun(runId: string, message: string): SchedulerRun | null {
+    return this.updateSchedulerRunRecord(runId, {
+      status: 'cancelled',
+      error_message: message,
+      next_retry_at: null,
+      finished_at: nowIso(),
+    });
+  }
+
   failSchedulerRun(runId: string, message: string): SchedulerRun | null {
     return this.updateSchedulerRunRecord(runId, {
       status: 'failed',
@@ -625,6 +639,8 @@ export class AppRepository {
           review_json,
           publication_json,
           error_message,
+          archived_at,
+          archived_reason,
           created_at,
           updated_at
         )
@@ -639,6 +655,8 @@ export class AppRepository {
           @review_json,
           @publication_json,
           @error_message,
+          @archived_at,
+          @archived_reason,
           @created_at,
           @updated_at
         )
@@ -652,6 +670,8 @@ export class AppRepository {
           review_json = excluded.review_json,
           publication_json = excluded.publication_json,
           error_message = excluded.error_message,
+          archived_at = excluded.archived_at,
+          archived_reason = excluded.archived_reason,
           updated_at = excluded.updated_at
       `)
       .run({
@@ -665,6 +685,8 @@ export class AppRepository {
         review_json: job.reviewPackage ? JSON.stringify(job.reviewPackage) : null,
         publication_json: JSON.stringify(job.publicationResults),
         error_message: job.errorMessage,
+        archived_at: job.archivedAt,
+        archived_reason: job.archivedReason,
         created_at: job.createdAt,
         updated_at: job.updatedAt,
       });
@@ -787,6 +809,8 @@ export class AppRepository {
       reviewPackage,
       publicationResults: JSON.parse(row.publication_json) as PublicationResult[],
       errorMessage: row.error_message,
+      archivedAt: row.archived_at,
+      archivedReason: row.archived_reason,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     });

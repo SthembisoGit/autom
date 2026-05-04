@@ -53,36 +53,23 @@ export async function registerJobRoutes(
     }
   });
 
-  app.post('/jobs/:jobId/manual-clips/:sceneOrder', async (request, reply) => {
-    const params = request.params as { jobId: string; sceneOrder: string };
-    const sceneOrder = Number.parseInt(params.sceneOrder, 10);
-    if (!Number.isInteger(sceneOrder) || sceneOrder < 1) {
-      reply.code(400);
-      return { message: 'Scene order must be a positive integer.' };
-    }
-
-    const body = Buffer.isBuffer(request.body) ? request.body : null;
-    if (!body || body.length === 0) {
-      reply.code(400);
-      return { message: 'Manual clip upload cannot be empty.' };
-    }
+  app.post('/jobs/:jobId/cancel', async (request, reply) => {
+    const params = request.params as { jobId: string };
 
     try {
-      return await services.manualClipsService.uploadManualClip({
-        jobId: params.jobId,
-        sceneOrder,
-        body,
-        contentType:
-          typeof request.headers['content-type'] === 'string'
-            ? request.headers['content-type']
-            : null,
-        originalFileName:
-          typeof request.headers['x-file-name'] === 'string'
-            ? request.headers['x-file-name']
-            : null,
-      });
+      return services.jobsService.cancel(params.jobId);
     } catch (error) {
-      return sendServiceError(reply, error, 'Unable to upload manual clip.');
+      return sendServiceError(reply, error, 'Unable to cancel job.');
+    }
+  });
+
+  app.post('/jobs/:jobId/archive', async (request, reply) => {
+    const params = request.params as { jobId: string };
+
+    try {
+      return services.jobsService.archive(params.jobId);
+    } catch (error) {
+      return sendServiceError(reply, error, 'Unable to archive job.');
     }
   });
 

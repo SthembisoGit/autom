@@ -16,7 +16,6 @@ export async function ensureRuntimePaths(env: AppEnv): Promise<RuntimePaths> {
     mkdir(paths.outputDirectory, { recursive: true }),
     mkdir(paths.publishedDirectory, { recursive: true }),
     mkdir(paths.logDirectory, { recursive: true }),
-    mkdir(paths.manualClipDirectory, { recursive: true }),
     mkdir(dirname(resolveDatabasePath(env.DATABASE_URL)), { recursive: true }),
   ]);
 

@@ -3,14 +3,13 @@ import type { Platform } from '@autom/contracts';
 
 import { cleanupJobArtifacts } from '../lib/artifacts.js';
 import {
+  type CommandRunner,
   FfmpegRenderer,
   StubRenderer,
   createProcessRunner,
-  type CommandRunner,
 } from '../media/ffmpeg-renderer.js';
 import { ArtifactsService } from '../modules/artifacts.js';
 import { AuditService } from '../modules/audit.js';
-import { ManualClipsService } from '../modules/manual-clips.js';
 import { JobsService } from '../modules/jobs.js';
 import { ProfilesService } from '../modules/profiles.js';
 import { PublicationsService } from '../modules/publications.js';
@@ -19,6 +18,8 @@ import { SchedulerService } from '../modules/scheduler.js';
 import { WorkflowService } from '../modules/workflow.js';
 import { createVoiceProvider } from '../providers/deepgram-provider.js';
 import { createScriptProvider } from '../providers/gemini-provider.js';
+import { createTranscriptionProvider } from '../providers/groq-provider.js';
+import { createNewsProvider } from '../providers/news-provider.js';
 import { createVisualProvider } from '../providers/pexels-provider.js';
 import { FacebookPublisher } from '../publishers/facebook.js';
 import { LocalPublisher } from '../publishers/local.js';
@@ -26,13 +27,17 @@ import { TikTokPublisher } from '../publishers/tiktok.js';
 import { YoutubePublisher } from '../publishers/youtube.js';
 import { AppRepository } from '../repositories/app-repository.js';
 import { SqliteDatabase } from '../repositories/sqlite.js';
-import {
-  createDefaultProfile,
-  isLegacyDefaultProfile,
-  migrateLegacyDefaultProfile,
-} from './default-profile.js';
+import { createDefaultProfile } from './default-profile.js';
 import { ensureRuntimePaths, resolveDatabasePath } from './runtime.js';
-import type { MediaRenderer, Publisher, ScriptProvider, VisualProvider, VoiceProvider } from './types.js';
+import type {
+  MediaRenderer,
+  NewsProvider,
+  Publisher,
+  ScriptProvider,
+  TranscriptionProvider,
+  VisualProvider,
+  VoiceProvider,
+} from './types.js';
 
 export type AppServices = ReturnType<typeof createServices>;
 
@@ -40,9 +45,11 @@ type BootstrapOptions = {
   env?: NodeJS.ProcessEnv;
   commandRunner?: CommandRunner;
   mediaRenderer?: MediaRenderer;
-  publishers?: Publisher[]; 
+  publishers?: Publisher[];
+  newsProvider?: NewsProvider;
   scriptProvider?: ScriptProvider;
   voiceProvider?: VoiceProvider;
+  transcriptionProvider?: TranscriptionProvider;
   visualProvider?: VisualProvider;
 };
 
@@ -53,24 +60,13 @@ export async function bootstrap(options?: BootstrapOptions) {
   const repository = new AppRepository(database);
   const services = createServices(env, runtimePaths, repository, options);
 
-  if (services.profilesService.list().length === 0) {
+  if (repository.listProfiles().length === 0) {
     repository.upsertProfile(createDefaultProfile(['local']));
-  } else {
-    const defaultProfile = repository.getProfile('profile_default');
-    if (defaultProfile && isLegacyDefaultProfile(defaultProfile)) {
-      repository.upsertProfile(
-        migrateLegacyDefaultProfile(defaultProfile, defaultProfile.targetPlatforms)
-      );
-    }
   }
+  services.profilesService.ensureSeedProfile();
 
   const recoveredJobCount = await recoverInterruptedJobs(
     runtimePaths,
-    repository,
-    services.auditService
-  );
-  const recoveredManualClipJobCount = await recoverInterruptedManualClipJobs(
-    services.manualClipsService,
     repository,
     services.auditService
   );
@@ -79,13 +75,10 @@ export async function bootstrap(options?: BootstrapOptions) {
     services.auditService
   );
 
-  if (recoveredJobCount + recoveredManualClipJobCount + recoveredSchedulerRunCount > 0) {
+  if (recoveredJobCount + recoveredSchedulerRunCount > 0) {
     const state = repository.getSchedulerState();
     const recoveredParts = [
       recoveredJobCount > 0 ? `${recoveredJobCount} interrupted job(s)` : null,
-      recoveredManualClipJobCount > 0
-        ? `${recoveredManualClipJobCount} interrupted manual clip job(s)`
-        : null,
       recoveredSchedulerRunCount > 0
         ? `${recoveredSchedulerRunCount} interrupted scheduler run(s)`
         : null,
@@ -132,39 +125,33 @@ function createServices(
   );
   const commandRunner =
     options?.commandRunner ?? createProcessRunner(env.FFMPEG_COMMAND_TIMEOUT_SECONDS * 1000);
+  const newsProvider = options?.newsProvider ?? createNewsProvider();
   const workflowService = new WorkflowService(
     env,
     runtimePaths,
     repository,
     profilesService,
     auditService,
-    options?.scriptProvider ?? createScriptProvider(env),
+    options?.scriptProvider ?? createScriptProvider(env, newsProvider),
     options?.voiceProvider ?? createVoiceProvider(env),
+    options?.transcriptionProvider ?? createTranscriptionProvider(env),
     options?.visualProvider ?? createVisualProvider(env),
     options?.mediaRenderer ??
       (env.NODE_ENV === 'test' ? new StubRenderer() : new FfmpegRenderer(commandRunner))
-  );
-  const manualClipsService = new ManualClipsService(
-    env,
-    runtimePaths,
-    repository,
-    auditService,
-    workflowService,
-    commandRunner
   );
   const schedulerService = new SchedulerService(
     env,
     repository,
     profilesService,
     workflowService,
-    auditService
+    auditService,
+    newsProvider
   );
   const jobsService = new JobsService(repository, auditService, workflowService);
 
   return {
     auditService,
     artifactsService,
-    manualClipsService,
     profilesService,
     jobsService,
     reviewsService,
@@ -203,8 +190,7 @@ async function recoverInterruptedJobs(
     .listJobs()
     .filter(
       (job) =>
-        job.status === 'publish_pending' ||
-        (job.status === 'drafting' && job.manualClipBundle === null)
+        job.status === 'publish_pending' || job.status === 'drafting' || job.status === 'cancelling'
     );
 
   if (interruptedJobs.length === 0) {
@@ -215,40 +201,21 @@ async function recoverInterruptedJobs(
     const message =
       job.status === 'drafting'
         ? 'Draft job was interrupted by a server restart and was marked failed.'
-        : 'Publish job was interrupted by a server restart and was marked failed.';
+        : job.status === 'cancelling'
+          ? 'Job cancellation was interrupted by a server restart and the run was marked cancelled.'
+          : 'Publish job was interrupted by a server restart and was marked failed.';
 
     await cleanupJobArtifacts(runtimePaths, job.id);
-    auditService.error(job.id, message);
+    if (job.status === 'cancelling') {
+      auditService.info(job.id, message);
+    } else {
+      auditService.error(job.id, message);
+    }
     repository.updateJob({
       ...job,
-      status: 'failed',
+      status: job.status === 'cancelling' ? 'cancelled' : 'failed',
       errorMessage: message,
     });
-  }
-
-  return interruptedJobs.length;
-}
-
-async function recoverInterruptedManualClipJobs(
-  manualClipsService: ManualClipsService,
-  repository: AppRepository,
-  auditService: AuditService
-): Promise<number> {
-  const interruptedJobs = repository
-    .listJobs()
-    .filter(
-      (job) =>
-        job.manualClipBundle &&
-        (job.status === 'waiting_for_manual_clip' || job.status === 'drafting')
-    );
-
-  if (interruptedJobs.length === 0) {
-    return 0;
-  }
-
-  for (const job of interruptedJobs) {
-    auditService.info(job.id, 'Manual clip workflow recovered after restart.');
-    await manualClipsService.resumeIfReady(job.id, { allowDrafting: true });
   }
 
   return interruptedJobs.length;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import type { JobDetailResponse } from '@autom/contracts';
@@ -16,6 +16,8 @@ export function RunDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const pushToast = useToast();
   const navigate = useNavigate();
 
@@ -119,8 +121,7 @@ export function RunDetailPage() {
             : {
                 tone: 'warning',
                 title: 'Publication retry in progress',
-                message:
-                  'The delivery step is still running. Review the platform messages below.',
+                message: 'The delivery step is still running. Review the platform messages below.',
               }
       );
       await load({ background: true });
@@ -132,6 +133,75 @@ export function RunDetailPage() {
       });
     } finally {
       setRetrying(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (!detail) {
+      return;
+    }
+
+    if (
+      !confirmAction(
+        `Cancel "${detail.job.topic}"?\n\nThis stops the run after the current safe step.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsCancelling(true);
+      const updatedJob = await apiClient.cancelJob(detail.job.id);
+      pushToast({
+        tone: 'warning',
+        title: updatedJob.status === 'cancelled' ? 'Run cancelled' : 'Cancellation requested',
+        message:
+          updatedJob.status === 'cancelled'
+            ? `"${detail.job.topic}" was cancelled.`
+            : `"${detail.job.topic}" will stop after the current safe step.`,
+      });
+      await load({ background: true });
+    } catch (value) {
+      pushToast({
+        tone: 'danger',
+        title: 'Cancel failed',
+        message: value instanceof Error ? value.message : 'Unable to cancel the run.',
+      });
+    } finally {
+      setIsCancelling(false);
+    }
+  }
+
+  async function handleArchive() {
+    if (!detail) {
+      return;
+    }
+
+    if (
+      !confirmAction(
+        `Delete "${detail.job.topic}" from the normal lists?\n\nThis keeps the records and files, but removes the run from the main ops views.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsArchiving(true);
+      await apiClient.archiveJob(detail.job.id);
+      pushToast({
+        tone: 'success',
+        title: 'Run removed from list',
+        message: `"${detail.job.topic}" is now hidden from the normal ops views.`,
+      });
+      navigate('/runs');
+    } catch (value) {
+      pushToast({
+        tone: 'danger',
+        title: 'Delete failed',
+        message: value instanceof Error ? value.message : 'Unable to remove the run from the list.',
+      });
+    } finally {
+      setIsArchiving(false);
     }
   }
 
@@ -163,7 +233,11 @@ export function RunDetailPage() {
         loadFailed={loadFailed}
         onRetryJob={handleRetry}
         onRetryPublication={handleRetryPublication}
+        onCancelJob={handleCancel}
+        onArchiveJob={handleArchive}
         retrying={retrying}
+        cancelling={isCancelling}
+        archiving={isArchiving}
         onRefreshBackground={() => load({ background: true })}
         onRetry={() => void load()}
         pushToast={pushToast}
@@ -178,7 +252,11 @@ type RunDetailContentProps = {
   loadFailed: boolean;
   onRetryJob?: () => Promise<void>;
   onRetryPublication?: () => Promise<void>;
+  onCancelJob?: () => Promise<void>;
+  onArchiveJob?: () => Promise<void>;
   retrying?: boolean;
+  cancelling?: boolean;
+  archiving?: boolean;
   onRefreshBackground?: () => Promise<void>;
   onRetry: () => void;
   pushToast?: (toast: ToastInput) => void;
@@ -190,14 +268,15 @@ export function RunDetailContent({
   loadFailed,
   onRetryJob = async () => {},
   onRetryPublication = async () => {},
+  onCancelJob = async () => {},
+  onArchiveJob = async () => {},
   retrying = false,
+  cancelling = false,
+  archiving = false,
   onRefreshBackground = async () => {},
   onRetry,
   pushToast = () => {},
 }: RunDetailContentProps) {
-  const [manualClipFiles, setManualClipFiles] = useState<Record<number, File | null>>({});
-  const [uploadingSceneOrder, setUploadingSceneOrder] = useState<number | null>(null);
-
   if (isLoading && !detail) {
     return (
       <StatePanel
@@ -245,83 +324,18 @@ export function RunDetailContent({
     publicationResults.length > 0 &&
     hasPublicationFailure &&
     detail.progress.retryable;
-  const manualClipBundle = detail.job.manualClipBundle;
-  const jobId = detail.job.id;
   const hasLocalPublication = publicationResults.some(
     (result) => result.platform === 'local' && result.status === 'published'
   );
   const renderThumbnailPath = detail.job.reviewPackage?.renderBundle.thumbnailPath ?? null;
-
-  async function handleManualClipUpload(sceneOrder: number) {
-    const selectedFile = manualClipFiles[sceneOrder];
-    if (!selectedFile) {
-      pushToast({
-        tone: 'warning',
-        title: 'Choose a clip first',
-        message: `Select the MP4 for scene ${sceneOrder} before uploading.`,
-      });
-      return;
-    }
-
-    try {
-      setUploadingSceneOrder(sceneOrder);
-      const updatedJob = await apiClient.uploadManualClip(jobId, sceneOrder, selectedFile);
-      const remainingPending = updatedJob.manualClipBundle?.requests.some(
-        (request) => request.status === 'pending'
-      );
-
-      pushToast(
-        updatedJob.status === 'failed'
-          ? {
-              tone: 'danger',
-              title: 'Manual clip rejected',
-              message: updatedJob.errorMessage ?? 'The uploaded clip did not pass validation.',
-            }
-          : updatedJob.status === 'review_pending'
-            ? {
-                tone: 'success',
-                title: 'Clip accepted',
-                message: 'The workflow resumed and the review package is being prepared.',
-              }
-            : remainingPending
-              ? {
-                  tone: 'warning',
-                  title: 'Clip uploaded',
-                  message: 'The job is still waiting for the remaining manual clip(s).',
-                }
-              : {
-                  tone: 'info',
-                  title: 'Clip uploaded',
-                  message: 'The job is resuming now.',
-                }
-      );
-
-      setManualClipFiles((current) => ({
-        ...current,
-        [sceneOrder]: null,
-      }));
-      await onRefreshBackground().catch((error) => {
-        pushToast({
-          tone: 'warning',
-          title: 'Run refresh delayed',
-          message:
-            error instanceof Error
-              ? error.message
-              : 'The upload completed, but the page refresh is delayed.',
-        });
-      });
-      return updatedJob;
-    } catch (value) {
-      pushToast({
-        tone: 'danger',
-        title: 'Manual clip upload failed',
-        message: value instanceof Error ? value.message : 'Unable to upload the manual clip.',
-      });
-      return null;
-    } finally {
-      setUploadingSceneOrder(null);
-    }
-  }
+  const dialogueSpeakerNames = detail.job.reviewPackage?.renderBundle.dialogueSpeakerNames ?? [];
+  const sceneVisualOutcomes = detail.job.reviewPackage?.renderBundle.sceneVisualOutcomes ?? [];
+  const canCancel =
+    detail.job.status === 'drafting' ||
+    detail.job.status === 'cancelling' ||
+    detail.job.status === 'publish_pending';
+  const canArchive =
+    !detail.job.archivedAt && ['failed', 'published', 'cancelled'].includes(detail.job.status);
 
   return (
     <div className="stack">
@@ -344,127 +358,79 @@ export function RunDetailContent({
         </dl>
       </article>
 
-      {manualClipBundle ? (
-        <article className="card manual-clip-card">
-          <div className="row-between">
-            <div>
-              <p className="eyebrow">Manual clip intake</p>
-              <h3>Upload the premium Veo scene</h3>
-              <p className="card-intro muted">
-                Generate the clip in Flow, upload the MP4 here, and the run will continue
-                automatically. The final render mutes the clip by default.
-              </p>
-            </div>
-            <StatusBadge status={detail.job.status} />
+      <article className="card summary-card">
+        <div className="section-heading-row">
+          <div>
+            <p className="eyebrow">Run summary</p>
+            <h3>What matters first</h3>
+            <p className="card-intro muted">
+              Open the render, check the warning state, and move to review or recovery from here.
+            </p>
           </div>
-
-          <dl className="detail-list detail-list-compact">
-            <div>
-              <dt>Requested scenes</dt>
-              <dd>{manualClipBundle.requests.length}</dd>
-            </div>
-            <div>
-              <dt>Wait window</dt>
-              <dd>
-                {manualClipBundle.waitTimeoutSeconds >= 60
-                  ? `${Math.ceil(manualClipBundle.waitTimeoutSeconds / 60)}m`
-                  : `${manualClipBundle.waitTimeoutSeconds}s`}
-              </dd>
-            </div>
-          </dl>
-
-          <div className="stack">
-            {manualClipBundle.requests.map((request) => {
-              const selectedFile = manualClipFiles[request.sceneOrder] ?? null;
-              const isUploading = uploadingSceneOrder === request.sceneOrder;
-
-              return (
-                <section className="manual-clip-request" key={request.sceneOrder}>
-                  <div className="row-between manual-clip-request-header">
-                    <div>
-                      <p className="eyebrow">Scene {request.sceneOrder}</p>
-                      <h4>
-                        {request.targetClipDurationSeconds}s clip for {request.sceneText}
-                      </h4>
-                      <p className="muted">{request.audioDirective}</p>
-                    </div>
-                    <StatusBadge status={request.status} />
-                  </div>
-
-                  <pre className="manual-clip-prompt">{request.prompt}</pre>
-
-                  <div className="manual-clip-upload">
-                    <label className="manual-clip-file">
-                      <span className="field-note">Choose the MP4 for this scene</span>
-                      <input
-                        accept="video/mp4,video/*"
-                        onChange={(event) => {
-                          setManualClipFiles((current) => ({
-                            ...current,
-                            [request.sceneOrder]: event.target.files?.[0] ?? null,
-                          }));
-                        }}
-                        type="file"
-                      />
-                    </label>
-                    <div className="action-row">
-                      <button
-                        className="button button-secondary"
-                        onClick={async () => {
-                          try {
-                            if (!navigator.clipboard?.writeText) {
-                              pushToast({
-                                tone: 'warning',
-                                title: 'Clipboard unavailable',
-                                message: 'Copy the prompt manually if your browser blocks clipboard access.',
-                              });
-                              return;
-                            }
-
-                            await navigator.clipboard.writeText(request.prompt);
-                            pushToast({
-                              tone: 'success',
-                              title: 'Prompt copied',
-                              message: `Scene ${request.sceneOrder} prompt copied to the clipboard.`,
-                            });
-                          } catch (error) {
-                            pushToast({
-                              tone: 'danger',
-                              title: 'Copy failed',
-                              message:
-                                error instanceof Error
-                                  ? error.message
-                                  : 'Unable to copy the prompt to the clipboard.',
-                            });
-                          }
-                        }}
-                        type="button"
-                      >
-                        Copy prompt
-                      </button>
-                      <button
-                        className="button button-primary"
-                        disabled={request.status !== 'pending' || !selectedFile || isUploading}
-                        onClick={() => void handleManualClipUpload(request.sceneOrder)}
-                        type="button"
-                      >
-                        {isUploading ? 'Uploading...' : 'Upload clip'}
-                      </button>
-                    </div>
-                    <p className="field-note">
-                      {selectedFile
-                        ? `Selected file: ${selectedFile.name}`
-                        : request.status === 'uploaded'
-                          ? 'Clip already uploaded for this scene.'
-                          : 'The app waits here until the clip is uploaded or the wait window expires.'}
-                    </p>
-                  </div>
-                </section>
-              );
-            })}
+        </div>
+        <div className="detail-list detail-list-compact">
+          <div>
+            <dt>Review state</dt>
+            <dd>{detail.job.status.replace(/_/g, ' ')}</dd>
           </div>
-        </article>
-      ) : null}
+          <div>
+            <dt>Scenes</dt>
+            <dd>{detail.job.scriptPackage?.scenes.length ?? 0}</dd>
+          </div>
+          <div>
+            <dt>Warnings</dt>
+            <dd>{warnings.length}</dd>
+          </div>
+          <div>
+            <dt>Assets</dt>
+            <dd>{assetReferences.length}</dd>
+          </div>
+          <div>
+            <dt>Background bed</dt>
+            <dd>
+              {detail.job.reviewPackage?.renderBundle.backgroundAudioPresent ? 'Present' : 'None'}
+            </dd>
+          </div>
+        </div>
+        <div className="action-bar">
+          {detail.job.reviewPackage ? (
+            <a
+              className="button button-primary"
+              href={apiClient.getRenderArtifactUrl(detail.job.id, 'video')}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Open rendered video
+            </a>
+          ) : null}
+          <Link className="button button-secondary" to="/reviews">
+            Open review
+          </Link>
+          {canCancel ? (
+            <button
+              className="button button-secondary"
+              disabled={cancelling}
+              onClick={() => void onCancelJob()}
+              type="button"
+            >
+              {cancelling ? 'Cancelling...' : 'Cancel run'}
+            </button>
+          ) : null}
+          {canArchive ? (
+            <button
+              className="button button-secondary"
+              disabled={archiving}
+              onClick={() => void onArchiveJob()}
+              type="button"
+            >
+              {archiving ? 'Removing...' : 'Delete from list'}
+            </button>
+          ) : null}
+          <Link className="button button-secondary" to="/runs">
+            Back to runs
+          </Link>
+        </div>
+      </article>
 
       {detail.progress.stage === 'failed' ? (
         <article className="card">
@@ -558,6 +524,10 @@ export function RunDetailContent({
               <dd>{detail.job.scriptPackage?.scenes.length ?? 0}</dd>
             </div>
             <div>
+              <dt>Mode</dt>
+              <dd>{detail.job.reviewPackage?.renderBundle.contentMode ?? 'Not recorded'}</dd>
+            </div>
+            <div>
               <dt>Target duration</dt>
               <dd>
                 {detail.job.reviewPackage
@@ -594,6 +564,20 @@ export function RunDetailContent({
                     : 'Not recorded'
                   : 'Not recorded'}
               </dd>
+            </div>
+            <div>
+              <dt>Subtitle timing</dt>
+              <dd>
+                {detail.job.reviewPackage?.renderBundle.subtitleTimingSource ?? 'Not recorded'}
+              </dd>
+            </div>
+            <div>
+              <dt>Scene outcomes</dt>
+              <dd>{sceneVisualOutcomes.length || 'Not recorded'}</dd>
+            </div>
+            <div>
+              <dt>Speakers</dt>
+              <dd>{dialogueSpeakerNames.length ? dialogueSpeakerNames.join(', ') : 'n/a'}</dd>
             </div>
             <div>
               <dt>Generated</dt>
@@ -655,7 +639,7 @@ export function RunDetailContent({
 
               <div className="action-bar">
                 <Link className="button button-secondary" to="/reviews">
-                  Open review queue
+                  Open review
                 </Link>
                 <Link className="button button-secondary" to="/history">
                   Open history
@@ -731,10 +715,53 @@ export function RunDetailContent({
         </article>
       ) : null}
 
+      {sceneVisualOutcomes.length > 0 ? (
+        <article className="card">
+          <div className="row-between">
+            <div>
+              <h3>Scene visuals</h3>
+              <p className="muted">Requested premium mode versus the visual path actually used.</p>
+            </div>
+          </div>
+          <div className="stack stack-tight">
+            {sceneVisualOutcomes.map((outcome) => (
+              <div className="asset-reference" key={`scene-outcome-${outcome.sceneOrder}`}>
+                <div className="row-between">
+                  <div>
+                    <p className="asset-reference-title">Scene {outcome.sceneOrder}</p>
+                    <p className="muted">
+                      Requested {outcome.requestedVisualMode.replace(/_/g, ' ')} and rendered with{' '}
+                      {outcome.providerUsed}.
+                    </p>
+                  </div>
+                  <StatusBadge
+                    status={outcome.usedFallback ? 'pending_configuration' : 'published'}
+                  />
+                </div>
+                <dl className="detail-list detail-list-compact">
+                  <div>
+                    <dt>Requested</dt>
+                    <dd>{outcome.requestedVisualMode}</dd>
+                  </div>
+                  <div>
+                    <dt>Provider used</dt>
+                    <dd>{outcome.providerUsed}</dd>
+                  </div>
+                  <div>
+                    <dt>Fallback used</dt>
+                    <dd>{outcome.usedFallback ? 'Yes' : 'No'}</dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+          </div>
+        </article>
+      ) : null}
+
       <article className="card">
         <div className="row-between">
           <div>
-            <h3>Asset summary</h3>
+            <h3>Technical details</h3>
             <p className="muted">
               {assetReferences.length} asset reference{assetReferences.length === 1 ? '' : 's'} were
               recorded for this run.
@@ -782,6 +809,22 @@ export function RunDetailContent({
                     <dt>Repair flow</dt>
                     <dd>{detail.job.scriptMetadata.repaired ? 'Used' : 'Not needed'}</dd>
                   </div>
+                  <div>
+                    <dt>Category</dt>
+                    <dd>{detail.job.scriptMetadata.categoryLabel ?? 'n/a'}</dd>
+                  </div>
+                  <div>
+                    <dt>Platform fit</dt>
+                    <dd>{detail.job.scriptMetadata.platformFit ?? 'n/a'}</dd>
+                  </div>
+                  <div>
+                    <dt>Monetization score</dt>
+                    <dd>{detail.job.scriptMetadata.monetizationScore ?? 'n/a'}</dd>
+                  </div>
+                  <div>
+                    <dt>Hook style</dt>
+                    <dd>{detail.job.scriptMetadata.hookStyle ?? 'n/a'}</dd>
+                  </div>
                 </dl>
               </div>
             ) : null}
@@ -826,6 +869,14 @@ export function RunDetailContent({
                       <div>
                         <dt>Source</dt>
                         <dd>{reference.sourceUrl ?? 'Local artifact'}</dd>
+                      </div>
+                      <div>
+                        <dt>Match quality</dt>
+                        <dd>{reference.matchQuality ?? 'n/a'}</dd>
+                      </div>
+                      <div>
+                        <dt>Reuse status</dt>
+                        <dd>{reference.reuseStatus ?? 'n/a'}</dd>
                       </div>
                     </dl>
                   </div>
@@ -876,7 +927,7 @@ function formatDurationSeconds(value: number | null, fallback = 'Not recorded') 
 }
 
 function shouldPollJob(detail: JobDetailResponse['job']) {
-  if (detail.status === 'drafting' || detail.status === 'waiting_for_manual_clip') {
+  if (detail.status === 'drafting' || detail.status === 'cancelling') {
     return true;
   }
 
@@ -885,6 +936,14 @@ function shouldPollJob(detail: JobDetailResponse['job']) {
   }
 
   return false;
+}
+
+function confirmAction(message: string) {
+  if (typeof globalThis.confirm === 'function') {
+    return globalThis.confirm(message);
+  }
+
+  return true;
 }
 
 function describePublicationResult(result: JobDetailResponse['job']['publicationResults'][number]) {

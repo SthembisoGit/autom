@@ -41,6 +41,17 @@ function createEnv(): AppEnv {
     FFPROBE_PATH: 'fake-ffprobe',
     FFMPEG_COMMAND_TIMEOUT_SECONDS: 600,
     GEMINI_API_KEY: undefined,
+    GEMINI_SCRIPT_MODEL: 'gemini-2.5-flash',
+    GROQ_API_KEY: undefined,
+    GROQ_SCRIPT_MODEL: 'llama-3.3-70b-versatile',
+    GROQ_SCRIPT_TIMEOUT_SECONDS: 45,
+    GROQ_TRANSCRIPTION_MODEL: 'whisper-large-v3-turbo',
+    GROQ_TRANSCRIPTION_TIMEOUT_SECONDS: 120,
+    TAVILY_API_KEY: undefined,
+    COHERE_API_KEY: undefined,
+    MISTRAL_API_KEY: undefined,
+    MISTRAL_SCRIPT_MODEL: 'mistral-small-latest',
+    MISTRAL_SCRIPT_TIMEOUT_SECONDS: 45,
     DEEPGRAM_API_KEY: undefined,
     PEXELS_API_KEY: undefined,
     YOUTUBE_CLIENT_ID: undefined,
@@ -68,6 +79,8 @@ function createJob(): GenerationJob {
     reviewPackage: null,
     publicationResults: [],
     errorMessage: null,
+    archivedAt: null,
+    archivedReason: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -147,6 +160,13 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
           externalId: 'pexels-1',
           sceneOrder: 1,
           query: scriptPackage.scenes[0]?.visualQuery ?? null,
+          retrievalOrigin: 'stock',
+          licenseLabel: 'Pexels License',
+          rightsSummary: 'Scene clip for renderer tests.',
+          attributionRequired: false,
+          entityLabel: null,
+          matchQuality: null,
+          reuseStatus: null,
         },
         {
           kind: 'audio',
@@ -158,6 +178,13 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
           externalId: null,
           sceneOrder: null,
           query: null,
+          retrievalOrigin: 'research',
+          licenseLabel: null,
+          rightsSummary: null,
+          attributionRequired: false,
+          entityLabel: null,
+          matchQuality: null,
+          reuseStatus: null,
         },
       ],
       warnings: [],
@@ -191,7 +218,7 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
       (call) =>
         call.command === 'fake-ffmpeg' &&
         call.args.includes('lavfi') &&
-        call.args.some((value) => value.includes('color=c=black'))
+        call.args.some((value) => value.includes('color=c=0x0f172a'))
     );
     assert.equal(Boolean(fallbackCall), true);
 
@@ -202,6 +229,13 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
         call.args.includes(narrationPath)
     );
     assert.equal(Boolean(previewCall), true);
+    assert.equal(previewCall?.args.includes(sourceVideoPath), true);
+    assert.equal(
+      previewCall?.args.some(
+        (value) => value.includes('FontSize=13') && value.includes('MarginV=40')
+      ),
+      true
+    );
 
     const thumbnailCall = calls.find(
       (call) => call.command === 'fake-ffmpeg' && call.args.includes('thumbnail.jpg')
@@ -212,6 +246,7 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
     assert.equal(Boolean(ffprobeCall), true);
     assert.equal(progressMessages.includes('Rendering scene 1 of 2.'), true);
     assert.equal(progressMessages.includes('Rendering scene 2 of 2.'), true);
+    assert.equal(progressMessages.includes('Subtitle timing source used: scene_duration.'), true);
     assert.equal(progressMessages.includes('Concatenating rendered scenes.'), true);
     assert.equal(progressMessages.includes('Encoding final preview video.'), true);
     assert.equal(progressMessages.includes('Extracting review thumbnail.'), true);
@@ -255,8 +290,7 @@ test('FfmpegRenderer uses narration timeline to split subtitles into readable cu
         scenes: [
           {
             order: 1,
-            text:
-              'This subtitle test uses a much longer sentence so the renderer must break it into smaller, readable cues instead of one oversized paragraph on screen.',
+            text: 'This subtitle test uses a much longer sentence so the renderer must break it into smaller, readable cues instead of one oversized paragraph on screen.',
             visualQuery: 'subtitle wrapping test',
             durationSeconds: 12,
           },
@@ -286,7 +320,10 @@ test('FfmpegRenderer uses narration timeline to split subtitles into readable cu
     assert.equal(reviewPackage.renderBundle.renderedDurationSeconds, 12);
     assert.equal(reviewPackage.renderBundle.narrationDurationSeconds, null);
     assert.equal(reviewPackage.renderBundle.subtitleTimingSource, 'voice_timeline');
-    assert.equal(contentLines.every((line) => line.length <= 32), true);
+    assert.equal(
+      contentLines.every((line) => line.length <= 32),
+      true
+    );
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
@@ -450,7 +487,7 @@ test('FfmpegRenderer surfaces which render step timed out', async () => {
   const runtimePaths = createRuntimePaths(workspaceRoot);
   const renderer = new FfmpegRenderer(async (command, _args, _cwd) => {
     if (command === 'fake-ffmpeg') {
-        throw new Error('fake-ffmpeg timed out after 600000ms.');
+      throw new Error('fake-ffmpeg timed out after 600000ms.');
     }
 
     return { stdout: '8.0\n', stderr: '' };
@@ -471,6 +508,151 @@ test('FfmpegRenderer surfaces which render step timed out', async () => {
       }),
       /Scene 1 render failed: fake-ffmpeg timed out after 600000ms\./i
     );
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('FfmpegRenderer renders dialogue scenes with character assets and Groq-timed subtitles', async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'autom-render-'));
+  const runtimePaths = createRuntimePaths(workspaceRoot);
+  const job = createJob();
+  const profile: ContentProfile = {
+    ...createDefaultProfile(),
+    contentMode: 'dialogue',
+    dialogueCharacterPresetId: 'studio_duo_v2',
+    dialogueHostAName: 'Maya',
+    dialogueHostBName: 'Theo',
+    dialogueVoiceA: 'aura-2-thalia-en',
+    dialogueVoiceB: 'aura-2-orion-en',
+  };
+  const scriptPackage: ScriptPackage = {
+    ...createScriptPackage(),
+    scenes: [
+      {
+        order: 1,
+        text: 'Maya and Theo explain the new workflow.',
+        visualQuery: 'dashboard walkthrough',
+        durationSeconds: 6,
+      },
+    ],
+    totalDurationSeconds: 6,
+    dialogue: {
+      speakers: [
+        { id: 'host_a', name: 'Maya', role: 'lead' },
+        { id: 'host_b', name: 'Theo', role: 'analyst' },
+      ],
+      turns: [
+        {
+          order: 1,
+          speakerId: 'host_a',
+          sceneOrder: 1,
+          text: 'Let us start with the workflow problem.',
+          shotType: 'speaker_focus',
+          shotNote: 'Open on Maya.',
+          visualQuery: null,
+        },
+        {
+          order: 2,
+          speakerId: 'host_b',
+          sceneOrder: 1,
+          text: 'Then show the software step that fixes it.',
+          shotType: 'duo',
+          shotNote: 'Theo replies with the practical fix.',
+          visualQuery: null,
+        },
+      ],
+    },
+  };
+  const calls: CommandCall[] = [];
+  const progressMessages: string[] = [];
+  const renderer = new FfmpegRenderer(async (command, args, cwd) => {
+    calls.push({ command, args, cwd });
+
+    if (command === 'fake-ffmpeg') {
+      const outputName = args.at(-1);
+      if (typeof outputName === 'string' && /\.(mp4|jpg)$/i.test(outputName)) {
+        await writeFile(join(cwd, outputName), `${outputName}-artifact`, 'utf8');
+      }
+
+      return { stdout: '', stderr: '' };
+    }
+
+    if (command === 'fake-ffprobe') {
+      return { stdout: '6.0\n', stderr: '' };
+    }
+
+    throw new Error(`Unexpected command ${command}`);
+  });
+
+  try {
+    const reviewPackage = await renderer.render({
+      env: createEnv(),
+      profile,
+      job,
+      scriptPackage,
+      selectedVisualQueries: ['dashboard walkthrough'],
+      assetReferences: [],
+      warnings: [],
+      narrationPath: null,
+      sceneNarrationTimeline: [
+        {
+          sceneOrder: 1,
+          startSeconds: 0,
+          endSeconds: 6,
+        },
+      ],
+      dialogueTurnTimeline: [
+        {
+          turnOrder: 1,
+          sceneOrder: 1,
+          speakerId: 'host_a',
+          startSeconds: 0,
+          endSeconds: 2.8,
+          text: 'Let us start with the workflow problem.',
+          shotType: 'speaker_focus',
+        },
+        {
+          turnOrder: 2,
+          sceneOrder: 1,
+          speakerId: 'host_b',
+          startSeconds: 2.8,
+          endSeconds: 6,
+          text: 'Then show the software step that fixes it.',
+          shotType: 'duo',
+        },
+      ],
+      transcriptWords: [
+        { word: 'Let', startSeconds: 0, endSeconds: 0.2, confidence: 0.9 },
+        { word: 'us', startSeconds: 0.2, endSeconds: 0.32, confidence: 0.9 },
+        { word: 'start', startSeconds: 0.32, endSeconds: 0.6, confidence: 0.9 },
+        { word: 'Then', startSeconds: 2.8, endSeconds: 3.1, confidence: 0.9 },
+        { word: 'show', startSeconds: 3.1, endSeconds: 3.4, confidence: 0.9 },
+      ],
+      contentMode: 'dialogue',
+      runtimePaths,
+      onProgress: (message) => {
+        progressMessages.push(message);
+      },
+    });
+
+    assert.equal(reviewPackage.renderBundle.contentMode, 'dialogue');
+    assert.equal(reviewPackage.renderBundle.subtitleTimingSource, 'groq_word_timestamps');
+    assert.deepEqual(reviewPackage.renderBundle.dialogueSpeakerNames, ['Maya', 'Theo']);
+    assert.equal(reviewPackage.renderBundle.dialogueTurnCount, 2);
+
+    const dialogueSceneCall = calls.find(
+      (call) =>
+        call.command === 'fake-ffmpeg' &&
+        call.args.includes('scene-1.mp4') &&
+        call.args.some((value) => /host-a[\\/].*base\.png$/i.test(value))
+    );
+    assert.equal(Boolean(dialogueSceneCall), true);
+    assert.equal(
+      progressMessages.includes('Subtitle timing source used: groq_word_timestamps.'),
+      true
+    );
+    assert.equal(progressMessages.includes('Dialogue character preset used: studio_duo_v2.'), true);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

@@ -45,7 +45,8 @@ test('ReviewsContent surfaces warnings and job stats for pending review work', (
     </MemoryRouter>
   );
 
-  assert.match(markup, /2 scenes, 2 assets/i);
+  assert.match(markup, /2 scenes/i);
+  assert.match(markup, /2 assets/i);
   assert.match(markup, /Review warnings: 1 warning before approval/i);
   assert.match(markup, /Review warnings/i);
   assert.match(markup, /Approving\.\.\./i);
@@ -141,6 +142,8 @@ function createReviewJob(): GenerationJob {
     },
     publicationResults: [],
     errorMessage: null,
+    archivedAt: null,
+    archivedReason: null,
     createdAt: '2026-03-18T09:59:00.000Z',
     updatedAt: '2026-03-18T10:01:00.000Z',
   };

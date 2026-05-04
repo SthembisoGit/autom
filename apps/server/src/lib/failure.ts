@@ -25,6 +25,8 @@ const RETRYABLE_FAILURE_PATTERNS = [
   /gateway timeout/i,
   /too many requests/i,
   /rate limit/i,
+  /quota exceeded/i,
+  /resource_exhausted/i,
   /duration budget/i,
   /regenerate the script/i,
 ];

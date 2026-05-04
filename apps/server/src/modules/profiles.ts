@@ -5,7 +5,12 @@ import type { ContentProfile, Platform, UpsertProfileRequest } from '@autom/cont
 import { ContentProfileSchema } from '@autom/contracts';
 
 import { normalizeCronExpression } from '../lib/cron.js';
-import { createDefaultProfile } from '../lib/default-profile.js';
+import {
+  createDefaultContentCategories,
+  createDefaultProfile,
+  migrateLegacyDefaultProfile,
+  shouldRefreshDefaultProfile,
+} from '../lib/default-profile.js';
 import { badRequest } from '../lib/errors.js';
 import { nowIso } from '../lib/time.js';
 import type { AppRepository } from '../repositories/app-repository.js';
@@ -19,7 +24,14 @@ export class ProfilesService {
   ensureSeedProfile(): ContentProfile {
     const existing = this.repository.listProfiles();
     if (existing.length > 0) {
-      return this.sanitizeProfile(existing[0]);
+      const current = existing[0];
+      if (shouldRefreshDefaultProfile(current)) {
+        return this.repository.upsertProfile(
+          this.repairProfile(migrateLegacyDefaultProfile(current, this.listAvailablePlatforms()))
+        );
+      }
+
+      return this.repairProfile(current);
     }
 
     return this.repository.upsertProfile(createDefaultProfile(this.listAvailablePlatforms()));
@@ -30,12 +42,26 @@ export class ProfilesService {
   }
 
   list(): ContentProfile[] {
-    return this.repository.listProfiles().map((profile) => this.sanitizeProfile(profile));
+    return this.repository
+      .listProfiles()
+      .map((profile) =>
+        this.repairProfile(
+          shouldRefreshDefaultProfile(profile)
+            ? migrateLegacyDefaultProfile(profile, this.listAvailablePlatforms())
+            : profile
+        )
+      );
   }
 
   get(profileId: string): ContentProfile | null {
     const profile = this.repository.getProfile(profileId);
-    return profile ? this.sanitizeProfile(profile) : null;
+    return profile
+      ? this.repairProfile(
+          shouldRefreshDefaultProfile(profile)
+            ? migrateLegacyDefaultProfile(profile, this.listAvailablePlatforms())
+            : profile
+        )
+      : null;
   }
 
   migrateAllProfilesToTargetPlatforms(targetPlatforms: Platform[]): number {
@@ -61,26 +87,6 @@ export class ProfilesService {
     return migratedProfiles;
   }
 
-  topicViolatesPolicy(profile: ContentProfile, topic: string): string | null {
-    const normalizedTopic = topic.toLowerCase();
-
-    const blockedTopic = profile.bannedTopics.find((candidate) =>
-      normalizedTopic.includes(candidate.toLowerCase())
-    );
-    if (blockedTopic) {
-      return `Topic matches banned topic rule "${blockedTopic}".`;
-    }
-
-    const blockedTerm = profile.bannedTerms.find((candidate) =>
-      normalizedTopic.includes(candidate.toLowerCase())
-    );
-    if (blockedTerm) {
-      return `Topic matches banned term "${blockedTerm}".`;
-    }
-
-    return null;
-  }
-
   upsert(profileId: string, input: UpsertProfileRequest): ContentProfile {
     const current = this.repository.getProfile(profileId);
     const timestamp = nowIso();
@@ -98,7 +104,7 @@ export class ProfilesService {
       );
     }
 
-    const profile = this.sanitizeProfile(
+    const profile = this.repairProfile(
       ContentProfileSchema.parse({
         id: current?.id ?? profileId ?? `profile_${nanoid(8)}`,
         createdAt: current?.createdAt ?? timestamp,
@@ -115,11 +121,34 @@ export class ProfilesService {
     return savedProfile;
   }
 
-  private sanitizeProfile(profile: ContentProfile): ContentProfile {
-    return {
+  private repairProfile(profile: ContentProfile): ContentProfile {
+    const repaired: ContentProfile = {
       ...profile,
+      contentCategories:
+        profile.contentCategories.length > 0
+          ? profile.contentCategories
+          : createDefaultContentCategories(),
+      contentMode: 'narration',
+      topicSource:
+        profile.topicSource === 'preferred_topics' ? 'category_pool' : profile.topicSource,
       targetPlatforms: this.sanitizeTargetPlatforms(profile.targetPlatforms),
     };
+
+    if (repaired.contentCategories.length === 0) {
+      return {
+        ...repaired,
+        ...createDefaultProfile(this.listAvailablePlatforms()),
+        id: profile.id,
+        createdAt: profile.createdAt,
+        updatedAt: nowIso(),
+        enabled: profile.enabled,
+        scheduleCron: profile.scheduleCron,
+        defaultVoice: profile.defaultVoice,
+        targetPlatforms: this.sanitizeTargetPlatforms(profile.targetPlatforms),
+      };
+    }
+
+    return repaired;
   }
 
   private sanitizeTargetPlatforms(targetPlatforms: Platform[]): Platform[] {

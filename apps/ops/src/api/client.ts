@@ -8,6 +8,7 @@ import type {
   Platform,
   PlatformConnection,
   SchedulerOverview,
+  SchedulerRun,
   UpsertProfileRequest,
 } from '@autom/contracts';
 
@@ -50,6 +51,12 @@ export const apiClient = {
       body: JSON.stringify({}),
     });
   },
+  cancelSchedulerRun(runId: string): Promise<SchedulerRun> {
+    return request(`/scheduler/runs/${runId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
   listProfiles(): Promise<ContentProfile[]> {
     return request('/profiles');
   },
@@ -71,22 +78,17 @@ export const apiClient = {
       body: JSON.stringify({}),
     });
   },
-  async uploadManualClip(jobId: string, sceneOrder: number, file: File): Promise<GenerationJob> {
-    const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/manual-clips/${sceneOrder}`, {
+  cancelJob(jobId: string): Promise<GenerationJob> {
+    return request(`/jobs/${jobId}/cancel`, {
       method: 'POST',
-      headers: {
-        'Content-Type': file.type || 'application/octet-stream',
-        'x-file-name': file.name,
-      },
-      body: file,
+      body: JSON.stringify({}),
     });
-
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as { message?: unknown };
-      throw new Error(typeof payload.message === 'string' ? payload.message : 'Request failed.');
-    }
-
-    return (await response.json()) as GenerationJob;
+  },
+  archiveJob(jobId: string): Promise<GenerationJob> {
+    return request(`/jobs/${jobId}/archive`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
   },
   getJobMonitor(): Promise<JobMonitorResponse> {
     return request('/jobs/monitor');

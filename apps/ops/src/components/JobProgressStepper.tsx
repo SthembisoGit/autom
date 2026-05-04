@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import type { JobProgress, JobProgressStage } from '@autom/contracts';
 
@@ -11,31 +11,32 @@ type ProgressStep = {
 const PROGRESS_STEPS: ProgressStep[] = [
   { stage: 'starting', label: 'Queued', percent: 0 },
   { stage: 'generating_script', label: 'Script', percent: 20 },
-  { stage: 'waiting_for_manual_clip', label: 'Manual clip', percent: 30 },
-  { stage: 'generating_narration', label: 'Voice', percent: 45 },
-  { stage: 'selecting_visuals', label: 'Visuals', percent: 65 },
-  { stage: 'rendering_review', label: 'Render', percent: 85 },
+  { stage: 'generating_narration', label: 'Voice', percent: 40 },
+  { stage: 'selecting_visuals', label: 'Visuals', percent: 60 },
+  { stage: 'rendering_review', label: 'Render', percent: 80 },
   { stage: 'publishing', label: 'Publish', percent: 100 },
 ];
 
 const STAGE_INDEX: Record<JobProgressStage, number> = {
   starting: 0,
+  cancelling: 4,
+  cancelled: 5,
   generating_script: 1,
-  waiting_for_manual_clip: 2,
-  generating_narration: 3,
-  selecting_visuals: 4,
-  rendering_review: 5,
-  ready_for_review: 5,
-  approved: 5,
-  publishing: 6,
-  published: 6,
-  failed: 6,
+  waiting_for_manual_clip: 1,
+  generating_narration: 2,
+  selecting_visuals: 3,
+  rendering_review: 4,
+  ready_for_review: 4,
+  approved: 4,
+  publishing: 5,
+  published: 5,
+  failed: 5,
 };
 
 const ACTIVE_STAGES: JobProgressStage[] = [
   'starting',
+  'cancelling',
   'generating_script',
-  'waiting_for_manual_clip',
   'generating_narration',
   'selecting_visuals',
   'rendering_review',
@@ -45,12 +46,13 @@ const ACTIVE_STAGES: JobProgressStage[] = [
 export function JobProgressStepper({ progress }: { progress: JobProgress }) {
   const currentIndex = STAGE_INDEX[progress.stage];
   const isPublished = progress.stage === 'published';
+  const isCancelled = progress.stage === 'cancelled';
   const isActive = ACTIVE_STAGES.includes(progress.stage);
   const targetPercent = isPublished
     ? 100
-    : progress.stage === 'failed'
+    : progress.stage === 'failed' || isCancelled
       ? Math.min(PROGRESS_STEPS[Math.max(0, currentIndex - 1)]?.percent ?? 0, 80)
-      : PROGRESS_STEPS[currentIndex]?.percent ?? 0;
+      : (PROGRESS_STEPS[currentIndex]?.percent ?? 0);
 
   const [displayedPercent, setDisplayedPercent] = useState(targetPercent);
   const displayedPercentRef = useRef(displayedPercent);

@@ -80,11 +80,16 @@ export function ProfilesPage() {
         tone: profile.tone,
         visualStyle: profile.visualStyle,
         promptDirectives: profile.promptDirectives,
-        preferredTopics: profile.preferredTopics,
-        bannedTopics: profile.bannedTopics,
-        bannedTerms: profile.bannedTerms,
-        sceneCount: profile.sceneCount,
+        contentCategories: profile.contentCategories,
+        sceneCount: 0,
         maxDurationSeconds: profile.maxDurationSeconds,
+        contentMode: profile.contentMode,
+        topicSource: profile.topicSource,
+        dialogueCharacterPresetId: profile.dialogueCharacterPresetId,
+        dialogueHostAName: profile.dialogueHostAName,
+        dialogueHostBName: profile.dialogueHostBName,
+        dialogueVoiceA: profile.dialogueVoiceA,
+        dialogueVoiceB: profile.dialogueVoiceB,
         defaultHashtags: profile.defaultHashtags,
         callToActionStyle: profile.callToActionStyle,
         callToActionTemplate: profile.callToActionTemplate,
@@ -210,14 +215,27 @@ export function ProfilesPage() {
                         <dt>Voice</dt>
                         <dd>{profile.defaultVoice}</dd>
                       </div>
+                      <div>
+                        <dt>Mode</dt>
+                        <dd>{profile.contentMode}</dd>
+                      </div>
                     </div>
                   </div>
 
                   <div className="profile-summary-chip-row">
-                    <span className="profile-summary-chip">{profile.sceneCount} scenes</span>
                     <span className="profile-summary-chip">{profile.maxDurationSeconds}s max</span>
                     <span className="profile-summary-chip">
-                      {profile.targetPlatforms.map(formatPlatformLabel).join(', ')}
+                      {formatContentModeLabel(profile.contentMode)}
+                    </span>
+                    <span className="profile-summary-chip">
+                      {profile.contentCategories.filter((category) => category.enabled).length}{' '}
+                      categories
+                    </span>
+                    <span className="profile-summary-chip">
+                      {formatPlatformLabel(profile.targetPlatforms[0])}
+                      {profile.targetPlatforms.length > 1
+                        ? ` +${profile.targetPlatforms.length - 1}`
+                        : ''}
                     </span>
                     <span className="profile-summary-chip">
                       CTA: {formatCtaLabel(profile.callToActionStyle)}
@@ -260,5 +278,14 @@ function formatCtaLabel(value: ContentProfile['callToActionStyle']) {
       return 'Community';
     case 'educational':
       return 'Educational';
+  }
+}
+
+function formatContentModeLabel(value: ContentProfile['contentMode']) {
+  switch (value) {
+    case 'dialogue':
+      return 'Dialogue';
+    case 'narration':
+      return 'Narration';
   }
 }
