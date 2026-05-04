@@ -15,15 +15,13 @@ import {
 import { applySceneVisualModes } from '../lib/dialogue.js';
 import type {
   ContentBrief,
-  NewsProvider,
   NewsTopicContext,
-  ScriptGenerationResult,
-  ScriptProvider,
-} from '../lib/types.js';
+} from '../domains/pipeline/types.js';
 import {
   type ContentOrchestrator,
   createContentOrchestrator,
 } from '../domains/research/content-orchestrator.js';
+import type { NewsProvider, ScriptGenerationResult, ScriptProvider } from '../lib/types.js';
 
 const LOCAL_PROMPT_VERSION = 'local-script-template-v1';
 const GEMINI_PROMPT_VERSION = 'gemini-script-v1';

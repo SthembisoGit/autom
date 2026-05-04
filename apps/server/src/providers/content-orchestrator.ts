@@ -10,13 +10,11 @@ import { buildStoryAngle } from '../domains/editorial/story-angle-planner.js';
 import type {
   ContentBrief,
   EvidenceItem,
-  NewsProvider,
   NewsTopicContext,
   ProviderTaskResult,
   RankedEvidenceSet,
-  RerankProvider,
-  SearchProvider,
-} from '../lib/types.js';
+} from '../domains/pipeline/types.js';
+import type { NewsProvider, RerankProvider, SearchProvider } from '../lib/types.js';
 
 const TAVILY_SEARCH_ENDPOINT = 'https://api.tavily.com/search';
 const COHERE_RERANK_ENDPOINT = 'https://api.cohere.com/v2/rerank';

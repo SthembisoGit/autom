@@ -1,6 +1,12 @@
 import type { ContentCategory, ContentProfile } from '@autom/contracts';
 
-import type { ContentBrief, MonetizationScore, NewsTopicContext, StoryAngle, TopicCandidate } from './types.js';
+import type {
+  ContentBrief,
+  MonetizationScore,
+  NewsTopicContext,
+  StoryAngle,
+  TopicCandidate,
+} from '../domains/pipeline/types.js';
 
 const PRIMARY_COUNTRY_SET = new Set(['US', 'UK', 'CA', 'AU']);
 const SECONDARY_COUNTRY_SET = new Set(['DE', 'IE', 'NL', 'NZ', 'SG']);

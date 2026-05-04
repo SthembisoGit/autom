@@ -15,12 +15,11 @@ import type {
   ContentBrief,
   ProviderTaskResult,
   VisualCandidate,
-  VisualProvider,
   VisualProviderFamily,
   VisualSceneKind,
   VisualScenePlan,
-  VisualSceneProvider,
-} from '../lib/types.js';
+} from '../domains/pipeline/types.js';
+import type { VisualProvider, VisualSceneProvider } from '../lib/types.js';
 import { createContentOrchestrator } from '../domains/research/content-orchestrator.js';
 import { createNewsProvider } from '../domains/research/news-provider.js';
 
