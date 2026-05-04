@@ -106,8 +106,14 @@ async function ensureHostRasterPack(
   const bodyLayer = await loadScaledLayer(join(sourceHostDirectory, 'body.svg'), rig.scale);
   const headLayer = await loadScaledLayer(join(sourceHostDirectory, 'head.svg'), rig.scale);
   const hairLayer = await loadScaledLayer(join(sourceHostDirectory, 'hair.svg'), rig.scale);
-  const eyesOpenLayer = await loadScaledLayer(join(sourceHostDirectory, 'eyes_open.svg'), rig.scale);
-  const eyesBlinkLayer = await loadScaledLayer(join(sourceHostDirectory, 'eyes_blink.svg'), rig.scale);
+  const eyesOpenLayer = await loadScaledLayer(
+    join(sourceHostDirectory, 'eyes_open.svg'),
+    rig.scale
+  );
+  const eyesBlinkLayer = await loadScaledLayer(
+    join(sourceHostDirectory, 'eyes_blink.svg'),
+    rig.scale
+  );
   const mouthLayers = Object.fromEntries(
     await Promise.all(
       DIALOGUE_MOUTH_STATES.map(async (state) => [
@@ -129,12 +135,16 @@ async function ensureHostRasterPack(
     { input: mouthLayers.rest.buffer, ...positions.mouth },
   ]);
 
-  await renderLayerComposite(canvas, blinkPath, [{ input: eyesBlinkLayer.buffer, ...positions.eyes }]);
+  await renderLayerComposite(canvas, blinkPath, [
+    { input: eyesBlinkLayer.buffer, ...positions.eyes },
+  ]);
 
   const mouthEntries = await Promise.all(
     DIALOGUE_MOUTH_STATES.map(async (state) => {
       const outputPath = join(hostOutputDirectory, `mouth-${state}.png`);
-      await renderLayerComposite(canvas, outputPath, [{ input: mouthLayers[state].buffer, ...positions.mouth }]);
+      await renderLayerComposite(canvas, outputPath, [
+        { input: mouthLayers[state].buffer, ...positions.mouth },
+      ]);
       return [state, outputPath] as const;
     })
   );
@@ -158,7 +168,9 @@ async function loadScaledLayer(inputPath: string, scale: number): Promise<Loaded
   };
 }
 
-function computeRigPositions(rig: HostRig): Record<'body' | 'head' | 'hair' | 'eyes' | 'mouth', Point> {
+function computeRigPositions(
+  rig: HostRig
+): Record<'body' | 'head' | 'hair' | 'eyes' | 'mouth', Point> {
   const scaled = (point: Point): Point => ({ x: point.x * rig.scale, y: point.y * rig.scale });
   const round = (point: Point): Point => ({ x: Math.round(point.x), y: Math.round(point.y) });
 

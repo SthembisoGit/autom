@@ -11,20 +11,16 @@ import type {
 import { ReviewPackageSchema } from '@autom/contracts';
 
 import {
+  type SceneNarrationTiming,
   buildSubtitleCues,
   formatSrtTimestamp,
   getNarrationOvershootAllowanceSeconds,
-  type SceneNarrationTiming,
 } from '../lib/content-quality.js';
 import { nowIso } from '../lib/time.js';
-import type {
-  DialogueTurnTiming,
-  MediaRenderer,
-  TranscriptWordTiming,
-} from '../lib/types.js';
+import type { DialogueTurnTiming, MediaRenderer, TranscriptWordTiming } from '../lib/types.js';
 import {
-  ensureDialogueCharacterRasters,
   type DialogueCharacterRasterPack,
+  ensureDialogueCharacterRasters,
 } from './dialogue-assets.js';
 
 const VIDEO_WIDTH = 1080;
@@ -55,7 +51,7 @@ type ResolvedSceneTiming = {
 };
 
 type SceneVisualDecision = {
-  mode: 'dialogue' | 'footage' | 'fallback';
+  mode: 'dialogue' | 'footage' | 'image' | 'fallback';
   sceneAsset: AssetReference | null;
   dialogueTurns: DialogueTurnTiming[];
   transcriptWords: TranscriptWordTiming[];
@@ -123,7 +119,8 @@ export class FfmpegRenderer implements MediaRenderer {
       narrationDurationSeconds !== null ? narrationDurationSeconds : targetDurationSeconds;
     const videoPaddingSeconds = Math.max(
       0,
-      renderedDurationSeconds - resolvedSceneTimings.reduce((sum, timing) => sum + timing.durationSeconds, 0)
+      renderedDurationSeconds -
+        resolvedSceneTimings.reduce((sum, timing) => sum + timing.durationSeconds, 0)
     );
     const longestSceneDurationSeconds = Math.max(
       ...resolvedSceneTimings.map((timing) => timing.durationSeconds)
@@ -138,7 +135,10 @@ export class FfmpegRenderer implements MediaRenderer {
     const isDialogueRender = contentMode === 'dialogue' && Boolean(input.scriptPackage.dialogue);
     const characterRasters =
       isDialogueRender && input.profile.dialogueCharacterPresetId
-        ? await ensureDialogueCharacterRasters(input.profile.dialogueCharacterPresetId, jobTempDirectory)
+        ? await ensureDialogueCharacterRasters(
+            input.profile.dialogueCharacterPresetId,
+            jobTempDirectory
+          )
         : null;
     const subtitleTrack = buildSrt(
       input.scriptPackage.scenes,
@@ -148,8 +148,11 @@ export class FfmpegRenderer implements MediaRenderer {
     );
     await writeFile(subtitlesPath, subtitleTrack.srt, 'utf8');
 
-    const videoAssetsByScene = indexSceneVideoAssets(input.assetReferences);
-    const captionFilter = buildCaptionFilter(contentMode, characterRasters?.subtitleSafeZone ?? null);
+    const sceneAssetsByScene = indexSceneVisualAssets(input.assetReferences);
+    const captionFilter = buildCaptionFilter(
+      contentMode,
+      characterRasters?.subtitleSafeZone ?? null
+    );
     const backgroundAudioPath = await findBackgroundAudioSource(
       this.runCommand,
       input.env.FFPROBE_PATH,
@@ -179,7 +182,7 @@ export class FfmpegRenderer implements MediaRenderer {
       await input.onProgress?.(
         `Rendering scene ${scene.order} of ${input.scriptPackage.scenes.length}.`
       );
-      const sceneAsset = videoAssetsByScene.get(scene.order) ?? null;
+      const sceneAsset = sceneAssetsByScene.get(scene.order) ?? null;
       const sceneTiming = sceneTimingByOrder.get(scene.order) ?? {
         sceneOrder: scene.order,
         startSeconds: 0,
@@ -377,12 +380,18 @@ export class FfmpegRenderer implements MediaRenderer {
             input.characterRasters
           )
         : input.visualDecision.mode === 'footage' && input.visualDecision.sceneAsset
-        ? buildFootageSceneArgs(
-            input.visualDecision.sceneAsset.path,
-            input.durationSeconds,
-            outputName
-          )
-        : buildFallbackSceneArgs(input.durationSeconds, outputName);
+          ? buildFootageSceneArgs(
+              input.visualDecision.sceneAsset.path,
+              input.durationSeconds,
+              outputName
+            )
+          : input.visualDecision.mode === 'image' && input.visualDecision.sceneAsset
+            ? buildImageSceneArgs(
+                input.visualDecision.sceneAsset.path,
+                input.durationSeconds,
+                outputName
+              )
+          : buildFallbackSceneArgs(input.durationSeconds, outputName);
 
     await this.runRenderCommand(
       `Scene ${input.sceneOrder} render`,
@@ -531,7 +540,9 @@ function scaleSceneTimeline(
     const startSeconds = timing.startSeconds * scale;
     const scaledEnd = timing.endSeconds * scale;
     const endSeconds =
-      index === sorted.length - 1 ? targetDurationSeconds : Math.min(targetDurationSeconds, scaledEnd);
+      index === sorted.length - 1
+        ? targetDurationSeconds
+        : Math.min(targetDurationSeconds, scaledEnd);
     return {
       sceneOrder: timing.sceneOrder,
       startSeconds,
@@ -606,7 +617,7 @@ function resolveSceneVisualDecision(input: {
 
   if (input.sceneAsset) {
     return {
-      mode: 'footage',
+      mode: isRenderableImageAsset(input.sceneAsset) ? 'image' : 'footage',
       providerUsed: normalizeVisualProvider(input.sceneAsset.provider),
       usedFallback: false,
       sceneAsset: input.sceneAsset,
@@ -684,6 +695,36 @@ function buildFootageSceneArgs(
   ];
 }
 
+function buildImageSceneArgs(
+  sourcePath: string,
+  durationSeconds: number,
+  outputName: string
+): string[] {
+  const totalFrames = Math.max(1, Math.ceil(durationSeconds * VIDEO_FRAME_RATE));
+
+  return [
+    '-y',
+    '-loop',
+    '1',
+    '-i',
+    sourcePath,
+    '-t',
+    String(durationSeconds),
+    '-an',
+    '-vf',
+    `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop=${VIDEO_WIDTH}:${VIDEO_HEIGHT},zoompan=z='min(zoom+0.0008,1.14)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${VIDEO_WIDTH}x${VIDEO_HEIGHT}:fps=${VIDEO_FRAME_RATE},setsar=1`,
+    '-c:v',
+    'libx264',
+    '-preset',
+    VIDEO_ENCODING_PRESET,
+    '-pix_fmt',
+    'yuv420p',
+    '-movflags',
+    '+faststart',
+    outputName,
+  ];
+}
+
 function buildDialogueSceneArgs(
   durationSeconds: number,
   outputName: string,
@@ -705,8 +746,14 @@ function buildDialogueSceneArgs(
   const focusBExpression = buildHighlightExpression(focusBShots);
   const speakerAMouthCues = buildDialogueMouthCues('host_a', speakerAWindows, transcriptWords);
   const speakerBMouthCues = buildDialogueMouthCues('host_b', speakerBWindows, transcriptWords);
-  const hostAScaledWidth = buildScaledHostWidth(characterRasters.canvas.width, characterRasters.hostA.scale);
-  const hostBScaledWidth = buildScaledHostWidth(characterRasters.canvas.width, characterRasters.hostB.scale);
+  const hostAScaledWidth = buildScaledHostWidth(
+    characterRasters.canvas.width,
+    characterRasters.hostA.scale
+  );
+  const hostBScaledWidth = buildScaledHostWidth(
+    characterRasters.canvas.width,
+    characterRasters.hostB.scale
+  );
 
   return [
     '-y',
@@ -995,20 +1042,34 @@ async function validatePreviewOutput(
   }
 }
 
-function indexSceneVideoAssets(assetReferences: AssetReference[]): Map<number, AssetReference> {
-  const sceneVideoAssets = new Map<number, AssetReference>();
+function indexSceneVisualAssets(assetReferences: AssetReference[]): Map<number, AssetReference> {
+  const sceneAssets = new Map<number, AssetReference>();
 
   for (const reference of assetReferences) {
-    if (reference.kind !== 'video' || reference.sceneOrder === null) {
+    if (reference.sceneOrder === null || !isRenderableSceneAsset(reference)) {
       continue;
     }
 
-    if (!sceneVideoAssets.has(reference.sceneOrder)) {
-      sceneVideoAssets.set(reference.sceneOrder, reference);
+    const existing = sceneAssets.get(reference.sceneOrder);
+    if (!existing) {
+      sceneAssets.set(reference.sceneOrder, reference);
+      continue;
+    }
+
+    if (existing.kind !== 'video' && reference.kind === 'video') {
+      sceneAssets.set(reference.sceneOrder, reference);
     }
   }
 
-  return sceneVideoAssets;
+  return sceneAssets;
+}
+
+function isRenderableSceneAsset(reference: AssetReference): boolean {
+  return reference.kind === 'video' || isRenderableImageAsset(reference);
+}
+
+function isRenderableImageAsset(reference: AssetReference): boolean {
+  return reference.kind === 'metadata' && reference.mimeType?.startsWith('image/') === true;
 }
 
 function buildRenderSummary(input: RenderInput): string {
@@ -1105,7 +1166,10 @@ function normalizeDialogueTurnsForScene(
     .map((turn) => ({
       ...turn,
       startSeconds: Math.max(0, turn.startSeconds - sceneStartSeconds),
-      endSeconds: Math.min(sceneDurationSeconds, Math.max(0.1, turn.endSeconds - sceneStartSeconds)),
+      endSeconds: Math.min(
+        sceneDurationSeconds,
+        Math.max(0.1, turn.endSeconds - sceneStartSeconds)
+      ),
     }))
     .filter((turn) => turn.endSeconds > turn.startSeconds)
     .sort((left, right) => left.startSeconds - right.startSeconds);

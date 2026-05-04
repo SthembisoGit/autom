@@ -10,8 +10,8 @@ import {
   estimateNarrationDurationSeconds,
 } from '../lib/content-quality.js';
 import { DIALOGUE_HOST_A_ID, isDialogueMode } from '../lib/dialogue.js';
-import { createProcessRunner, type CommandRunner } from '../media/ffmpeg-renderer.js';
 import type { DialogueTurnTiming, VoiceProvider } from '../lib/types.js';
+import { type CommandRunner, createProcessRunner } from '../media/ffmpeg-renderer.js';
 
 const DEEPGRAM_TTS_ENDPOINT = 'https://api.deepgram.com/v1/speak';
 const DEEPGRAM_MIN_REQUEST_TIMEOUT_MS = 60_000;
@@ -118,7 +118,11 @@ export class DeepgramVoiceProvider implements VoiceProvider {
     return {
       narrationPath: narration.outputPath,
       assetReferences: [
-        buildNarrationAssetReference(narration.outputPath, narration.mimeType, profile.defaultVoice),
+        buildNarrationAssetReference(
+          narration.outputPath,
+          narration.mimeType,
+          profile.defaultVoice
+        ),
       ],
       warnings: narration.warnings,
       sceneNarrationTimeline: buildSceneNarrationTimeline(
@@ -147,7 +151,8 @@ export class DeepgramVoiceProvider implements VoiceProvider {
     let elapsedSeconds = 0;
 
     for (const turn of turns) {
-      const voiceModel = turn.speakerId === DIALOGUE_HOST_A_ID ? profile.dialogueVoiceA : profile.dialogueVoiceB;
+      const voiceModel =
+        turn.speakerId === DIALOGUE_HOST_A_ID ? profile.dialogueVoiceA : profile.dialogueVoiceB;
       const turnOutputDirectory = join(turnDirectory, `turn-${turn.order}`);
       const synthesis = await this.synthesizeText({
         texts: [turn.text],
@@ -206,7 +211,13 @@ export class DeepgramVoiceProvider implements VoiceProvider {
     const chunkPaths: string[] = [];
 
     for (const [index, chunk] of narrationChunks.entries()) {
-      const response = await requestDeepgramSpeech(this.apiKey, input.voiceModel, chunk, index, narrationChunks.length);
+      const response = await requestDeepgramSpeech(
+        this.apiKey,
+        input.voiceModel,
+        chunk,
+        index,
+        narrationChunks.length
+      );
       lastResponse = response;
       const chunkPath = join(chunkDirectory, `chunk-${index + 1}.mp3`);
       const audioBytes = await readAudioBytes(response, index, narrationChunks.length);
@@ -410,17 +421,20 @@ async function requestDeepgramSpeech(
   const requestTimeoutMs = buildDeepgramRequestTimeoutMs(chunk);
 
   try {
-    const response = await fetch(`${DEEPGRAM_TTS_ENDPOINT}?model=${encodeURIComponent(voiceModel)}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      signal: AbortSignal.timeout(requestTimeoutMs),
-      body: JSON.stringify({
-        text: chunk,
-      }),
-    });
+    const response = await fetch(
+      `${DEEPGRAM_TTS_ENDPOINT}?model=${encodeURIComponent(voiceModel)}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(requestTimeoutMs),
+        body: JSON.stringify({
+          text: chunk,
+        }),
+      }
+    );
 
     if (!response.ok) {
       throw new Error(`Deepgram narration failed with status ${response.status}.`);

@@ -58,7 +58,7 @@ export function buildLocalDialoguePackage(
       order: scene.order * 2,
       speakerId: DIALOGUE_HOST_B_ID,
       sceneOrder: scene.order,
-      text: `Right, so the simple takeaway is what changes for the viewer.`,
+      text: 'Right, so the simple takeaway is what changes for the viewer.',
       shotType: 'duo' as const,
       shotNote: 'Bring both hosts into frame.',
       visualQuery: null,

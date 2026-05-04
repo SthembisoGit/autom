@@ -3,7 +3,6 @@ import Fastify from 'fastify';
 
 import { registerRoutes } from './http/routes/index.js';
 import { bootstrap } from './lib/bootstrap.js';
-import type { CommandRunner } from './media/ffmpeg-renderer.js';
 import type {
   MediaRenderer,
   NewsProvider,
@@ -13,6 +12,7 @@ import type {
   VisualProvider,
   VoiceProvider,
 } from './lib/types.js';
+import type { CommandRunner } from './media/ffmpeg-renderer.js';
 
 export async function createApp(options?: {
   env?: NodeJS.ProcessEnv;

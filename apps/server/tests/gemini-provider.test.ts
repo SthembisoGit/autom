@@ -3,21 +3,22 @@ import test from 'node:test';
 
 import { createDefaultProfile } from '../src/lib/default-profile.js';
 import {
+  ContentOrchestrator,
+  FallbackSearchProvider,
+  HeuristicRerankProvider,
+} from '../src/providers/content-orchestrator.js';
+import {
   FallbackScriptProvider,
   GeminiScriptProvider,
   GroqScriptProvider,
   LocalScriptProvider,
   MistralScriptProvider,
 } from '../src/providers/gemini-provider.js';
-import {
-  ContentOrchestrator,
-  FallbackSearchProvider,
-  HeuristicRerankProvider,
-} from '../src/providers/content-orchestrator.js';
 
 function createScriptTestProfile() {
   return {
     ...createDefaultProfile(),
+    sceneCount: 6,
     contentMode: 'narration' as const,
     topicSource: 'category_pool' as const,
   };
@@ -102,7 +103,9 @@ test('GeminiScriptProvider retries scripts that exceed the duration budget', asy
                       ? `${Array.from(
                           { length: 24 },
                           (_, wordIndex) => `Scene ${index + 1} word ${wordIndex + 1}`
-                        ).join(' ')} For example, compare one manual process with one streamlined workflow to show the payoff.`
+                        ).join(
+                          ' '
+                        )} For example, compare one manual process with one streamlined workflow to show the payoff.`
                       : Array.from(
                           { length: 24 },
                           (_, wordIndex) => `Scene ${index + 1} word ${wordIndex + 1}`
@@ -290,11 +293,10 @@ test('LocalScriptProvider refuses weak factual topics without trusted evidence',
       enabled: category.id === 'history_people_and_power',
     })),
   };
-  const provider = new LocalScriptProvider(undefined, new ContentOrchestrator(
+  const provider = new LocalScriptProvider(
     undefined,
-    new FallbackSearchProvider(),
-    new HeuristicRerankProvider()
-  ));
+    new ContentOrchestrator(undefined, new FallbackSearchProvider(), new HeuristicRerankProvider())
+  );
 
   await assert.rejects(
     provider.generate(profile, 'The #MadlangaCommission'),
@@ -566,6 +568,7 @@ test('GeminiScriptProvider times out stalled requests instead of hanging indefin
 test('GeminiScriptProvider injects current news context and humanized narration rules for daily news profiles', async () => {
   const profile = {
     ...createDefaultProfile(),
+    sceneCount: 6,
     contentMode: 'narration' as const,
     topicSource: 'daily_news' as const,
   };
@@ -582,7 +585,8 @@ test('GeminiScriptProvider injects current news context and humanized narration 
           sourceName: 'Reuters',
           sourceUrl: 'https://example.com/openai-model',
           publishedAt: '2026-04-16T08:00:00.000Z',
-          snippet: 'OpenAI launched a faster reasoning model and said it is aimed at developer workflows.',
+          snippet:
+            'OpenAI launched a faster reasoning model and said it is aimed at developer workflows.',
           query: 'artificial intelligence',
         };
       },

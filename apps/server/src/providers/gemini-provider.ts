@@ -1,14 +1,18 @@
 import type { AppEnv } from '@autom/config';
-import type { ContentProfile, DialoguePackage, DialogueShotType, DialogueTurn, ScriptPackage } from '@autom/contracts';
+import type {
+  ContentProfile,
+  DialoguePackage,
+  DialogueShotType,
+  DialogueTurn,
+  ScriptPackage,
+} from '@autom/contracts';
 import { ScriptPackageSchema } from '@autom/contracts';
 
 import {
   estimateNarrationDurationSeconds,
   getNarrationOvershootAllowanceSeconds,
 } from '../lib/content-quality.js';
-import {
-  applySceneVisualModes,
-} from '../lib/dialogue.js';
+import { applySceneVisualModes } from '../lib/dialogue.js';
 import type {
   ContentBrief,
   NewsProvider,
@@ -16,7 +20,7 @@ import type {
   ScriptGenerationResult,
   ScriptProvider,
 } from '../lib/types.js';
-import { ContentOrchestrator, createContentOrchestrator } from './content-orchestrator.js';
+import { type ContentOrchestrator, createContentOrchestrator } from './content-orchestrator.js';
 
 const LOCAL_PROMPT_VERSION = 'local-script-template-v1';
 const GEMINI_PROMPT_VERSION = 'gemini-script-v1';
@@ -93,6 +97,8 @@ const JARGON_HEAVY_PATTERN =
   /\b(landscape|leverage|ecosystem|transformation|unlock|optimize|synergy|seamless|paradigm|frictionless|stakeholders|utilize)\b/i;
 const ROBOTIC_TRANSITION_PATTERN =
   /\b(moreover|furthermore|additionally|in today's world|it is important to note|delve into|moving forward)\b/i;
+const AI_CLICHE_PATTERN =
+  /\b(the interesting part of|the real problem is|the payoff is|what most people miss|the simple version is|that means fewer|clearer output|process that is easier to repeat)\b/i;
 const GROQ_CHAT_COMPLETIONS_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const MISTRAL_CHAT_COMPLETIONS_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
 
@@ -252,7 +258,12 @@ export class LocalScriptProvider implements ScriptProvider {
     const { newsContext, contentBrief } = researchContext;
     assertResearchSufficiency(topic, contentBrief);
     const scenePlan = deriveScenePlan(profile.maxDurationSeconds);
-    const baseSceneIdeas = buildLocalSceneIdeas(profile, topic, newsContext, scenePlan.targetSceneCount);
+    const baseSceneIdeas = buildLocalSceneIdeas(
+      profile,
+      topic,
+      newsContext,
+      scenePlan.targetSceneCount
+    );
     const sceneDurations = allocateDurations(
       Array.from({ length: scenePlan.targetSceneCount }, () => 1),
       resolveTargetDurationSeconds(baseSceneIdeas, profile.maxDurationSeconds)
@@ -380,27 +391,27 @@ export class GroqScriptProvider implements ScriptProvider {
           scriptPackage,
           scriptMetadata: {
             provider: 'groq',
-              model: this.model,
-              promptVersion: this.promptVersion,
-              mode: 'live',
-              attemptCount: attempt,
-              repaired: repairContext !== null,
-              searchProvider: contentBrief?.searchProvider ?? 'none',
-              rerankProvider: contentBrief?.rerankProvider ?? 'none',
-              verificationStatus: contentBrief?.verificationStatus ?? 'unverified',
-              evidenceSourceCount: contentBrief?.evidence.items.length ?? 0,
-              fallbackProvider: null,
-              providerChain: ['groq'],
-              categoryId: contentBrief?.category?.id ?? null,
-              categoryLabel: contentBrief?.category?.label ?? null,
-              platformFit: contentBrief?.category?.platformFit ?? null,
-              countryTargets: contentBrief?.category?.countryTargets ?? [],
-              monetizationScore: contentBrief?.monetizationScore?.total ?? null,
-              storyAngle: contentBrief?.storyAngle?.highStakesAngle ?? null,
-              hookStyle: contentBrief?.storyAngle?.hookStyle ?? null,
-              warnings: contentBrief?.warnings ?? [],
-            },
-          };
+            model: this.model,
+            promptVersion: this.promptVersion,
+            mode: 'live',
+            attemptCount: attempt,
+            repaired: repairContext !== null,
+            searchProvider: contentBrief?.searchProvider ?? 'none',
+            rerankProvider: contentBrief?.rerankProvider ?? 'none',
+            verificationStatus: contentBrief?.verificationStatus ?? 'unverified',
+            evidenceSourceCount: contentBrief?.evidence.items.length ?? 0,
+            fallbackProvider: null,
+            providerChain: ['groq'],
+            categoryId: contentBrief?.category?.id ?? null,
+            categoryLabel: contentBrief?.category?.label ?? null,
+            platformFit: contentBrief?.category?.platformFit ?? null,
+            countryTargets: contentBrief?.category?.countryTargets ?? [],
+            monetizationScore: contentBrief?.monetizationScore?.total ?? null,
+            storyAngle: contentBrief?.storyAngle?.highStakesAngle ?? null,
+            hookStyle: contentBrief?.storyAngle?.hookStyle ?? null,
+            warnings: contentBrief?.warnings ?? [],
+          },
+        };
       } catch (error) {
         lastIssue = error instanceof Error ? error.message : 'Unknown Groq generation failure.';
         repairContext =
@@ -449,7 +460,8 @@ export class FallbackScriptProvider implements ScriptProvider {
           },
         };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown script generation failure.';
+        const message =
+          error instanceof Error ? error.message : 'Unknown script generation failure.';
         failures.push(`${candidate.label}: ${message}`);
       }
     }
@@ -715,7 +727,10 @@ function buildGenerationPrompt(
     scenePlan.targetSceneCount * 15,
     Math.round(profile.maxDurationSeconds * 2.4)
   );
-  const targetWordsPerScene = Math.max(8, Math.round(targetWordsTotal / scenePlan.targetSceneCount));
+  const targetWordsPerScene = Math.max(
+    8,
+    Math.round(targetWordsTotal / scenePlan.targetSceneCount)
+  );
 
   const promptLines = [
     'Return JSON only that matches the provided schema.',
@@ -727,43 +742,53 @@ function buildGenerationPrompt(
     `Aim for roughly ${targetWordsTotal} spoken words total, or about ${targetWordsPerScene} words per scene, written for a narrator reading aloud.`,
     'Use short, spoken sentences instead of dense paragraphs.',
     'Use simple everyday English. Choose plain words over polished business language.',
-    'Write like a clear human narrator, not a consultant, marketer, or corporate blog post.',
-    'Use a hook, problem, demonstration, and payoff structure across the scenes.',
-    'Write for people searching for a practical answer, comparison, or tutorial.',
-    'If the topic is a product or platform, compare it against the obvious manual workflow or alternative.',
+    'Write like a smart person explaining this to one friend out loud.',
+    'Use contractions where they sound natural.',
+    'A few short fragments are fine if they sound punchy when read aloud.',
     'Avoid generic filler language and keep every scene concrete.',
-    'Include at least one practical example or comparison in the middle scenes.',
-    'For finance, SaaS, or SEO topics, name one specific scenario, metric, account type, workflow step, or screen the viewer would actually inspect.',
     'Make the opening feel worth stopping for on Meta: lead with stakes, surprise, or a clean unresolved question.',
     'Each new scene should add a fresh detail, contrast, or consequence. No scene should feel interchangeable.',
     'Do not use lazy filler lines like "this matters because" unless you immediately explain a concrete consequence.',
     'Avoid jargon like landscape, leverage, ecosystem, transformation, unlock, optimize, or synergy.',
     'Avoid robotic transitions like moreover, furthermore, additionally, and it is important to note.',
+    'Avoid generic AI phrasing like "the interesting part is", "the real problem is", or "the payoff is".',
     ...CONCRETE_SCENE_RULES,
     'Each scene must include text, visualQuery, and durationSeconds.',
     'Keep each scene at least 3 seconds long.',
     'Keep each scene readable on a phone screen and avoid overlong caption blocks.',
-    `Niche: ${profile.niche}.`,
     `Tone: ${profile.tone}.`,
-    `Visual style: ${profile.visualStyle}.`,
-    `Prompt directives: ${profile.promptDirectives}.`,
     `Content categories: ${joinOrNone(profile.contentCategories.map((category) => category.label))}.`,
     'Each tag must be a short keyword or short phrase, not a sentence.',
     'Keep every tag under 50 characters and avoid punctuation.',
     `CTA style: ${profile.callToActionStyle}.`,
-    `CTA template: ${profile.callToActionTemplate}.`,
     `CTA guardrails: ${profile.callToActionGuardrails}.`,
-    `Default hashtags: ${joinOrNone(profile.defaultHashtags)}.`,
     `Affiliate disclosure required: ${profile.requireAffiliateDisclosure ? 'yes' : 'no'}.`,
-    `Affiliate disclosure template: ${profile.affiliateDisclosureTemplate || 'none'}.`,
     'If the affiliate link template is empty, keep the CTA educational and do not imply affiliate status.',
-    'If the topic touches finance, keep it tool-led or comparison-led and avoid advice or promises.',
     'Title should sound search-led and specific, not generic or hypey.',
     'Description should summarize the practical payoff and context clearly.',
     'Keep tags lowercase, concise, and omit the # symbol.',
     'Keep each tag to one to four words. Do not return sentence-length tags.',
     'Place the strongest call to action near the final scene only.',
   ];
+
+  if (profile.topicSource === 'daily_news') {
+    promptLines.push(
+      'This is a current news explainer, not a tutorial.',
+      'Start with the sharpest update, then explain what changed and why it matters.',
+      'Keep background short. Stay on the new development.',
+      'Humanize the narration with restrained conversational phrasing.',
+      'Allow one light human reaction at most, but keep it clearly framed as commentary, not facts.',
+      'If part of the story is still unclear, say that plainly.'
+    );
+  } else {
+    promptLines.push(
+      'Write for someone who wants a clear answer fast, not a formal explainer.',
+      'If the topic is a product or platform, compare it against the obvious manual workflow or alternative.',
+      'Include at least one practical example or comparison in the middle scenes.',
+      'For finance, SaaS, or SEO topics, name one specific scenario, metric, account type, workflow step, or screen the viewer would actually inspect.',
+      'If the topic touches finance, keep it tool-led or comparison-led and avoid advice or promises.'
+    );
+  }
 
   if (contentBrief) {
     promptLines.push(
@@ -811,18 +836,6 @@ function buildGenerationPrompt(
     }
   }
 
-  if (profile.topicSource === 'daily_news') {
-    promptLines.push(
-      'Treat this as a current news explainer, not a timeless tutorial.',
-      'Keep every factual claim anchored to the supplied news context. Do not invent details, motives, numbers, or quotes.',
-      'Explain what happened, why people care, and what changes next in plain language.',
-      'Humanize the narration with occasional natural spoken phrasing, but keep it restrained and clear.',
-      'Allow one or two light opinion beats or gentle jokes, but keep them clearly framed as commentary, not facts.',
-      'If part of the story is uncertain, say it is unclear instead of pretending certainty.',
-      'Focus on the latest angle and avoid stale background unless it helps simplify the story.'
-    );
-  }
-
   if (newsContext) {
     promptLines.push(
       `Current news headline: ${newsContext.title}.`,
@@ -849,7 +862,10 @@ function buildRepairPrompt(
     scenePlan.targetSceneCount * 15,
     Math.round(profile.maxDurationSeconds * 2.4)
   );
-  const targetWordsPerScene = Math.max(8, Math.round(targetWordsTotal / scenePlan.targetSceneCount));
+  const targetWordsPerScene = Math.max(
+    8,
+    Math.round(targetWordsTotal / scenePlan.targetSceneCount)
+  );
 
   const promptLines = [
     'The previous response failed validation.',
@@ -860,19 +876,16 @@ function buildRepairPrompt(
     `Target scene count: about ${scenePlan.targetSceneCount}.`,
     `Target total duration: ${profile.maxDurationSeconds} seconds.`,
     `Target roughly ${targetWordsTotal} spoken words total, or about ${targetWordsPerScene} words per scene.`,
-    'Use a hook, problem, demonstration, and payoff structure across the scenes.',
-    'Write for people searching for a practical answer, comparison, or tutorial.',
     'Use simple, spoken English and avoid polished jargon.',
-    'If the topic is a product or platform, compare it against the obvious manual workflow or alternative.',
+    'Write like a smart person explaining it out loud, not a polished brand script.',
+    'Use contractions where they sound natural.',
     'Avoid generic filler language and keep every scene concrete.',
-    'Include at least one practical example or comparison in the middle scenes.',
-    'For finance, SaaS, or SEO topics, name one specific scenario, metric, account type, workflow step, or screen the viewer would actually inspect.',
     'Make the opening feel worth stopping for immediately.',
     'Escalate scene by scene instead of rephrasing the same idea.',
     'Avoid words like leverage, ecosystem, transformation, unlock, optimize, and synergy.',
     'Avoid robotic transitions like moreover, furthermore, additionally, and it is important to note.',
+    'Avoid generic AI phrasing like "the interesting part is", "the real problem is", or "the payoff is".',
     ...CONCRETE_SCENE_RULES,
-    'If the topic touches finance, keep it tool-led or comparison-led and avoid advice or promises.',
     'Each tag must be a short keyword or short phrase, not a sentence.',
     'Keep every tag to one to four words, under 40 characters, and avoid punctuation.',
     'If the affiliate link template is empty, keep the CTA educational and do not imply affiliate status.',
@@ -880,6 +893,20 @@ function buildRepairPrompt(
     'Previous response:',
     repairContext.rawResponse,
   ];
+
+  if (profile.topicSource === 'daily_news') {
+    promptLines.push(
+      'Treat this as a current news explainer, not a tutorial.',
+      'Lead with the new development, not a long setup.'
+    );
+  } else {
+    promptLines.push(
+      'If the topic is a product or platform, compare it against the obvious manual workflow or alternative.',
+      'Include at least one practical example or comparison in the middle scenes.',
+      'For finance, SaaS, or SEO topics, name one specific scenario, metric, account type, workflow step, or screen the viewer would actually inspect.',
+      'If the topic touches finance, keep it tool-led or comparison-led and avoid advice or promises.'
+    );
+  }
 
   if (contentBrief) {
     promptLines.push(
@@ -1198,17 +1225,18 @@ function buildLocalSceneIdeas(
   sceneCount: number
 ): string[] {
   const nextTopic =
-    profile.contentCategories[0]?.exampleTopics[0] ?? 'the next business or tech story worth watching';
+    profile.contentCategories[0]?.exampleTopics[0] ??
+    'the next business or tech story worth watching';
   const topicKey = topic.toLowerCase();
 
   if (profile.topicSource === 'daily_news' && newsContext) {
     const source = newsContext.sourceName ? ` according to ${newsContext.sourceName}` : '';
     return [
-      `Mm, the big story today is ${topic}${source}, and this scene states the core update in plain language.`,
-      'The next beat simplifies what actually changed and avoids jargon so the viewer understands the headline fast.',
-      'Now compare this update with the old normal or expectation so the shift feels concrete instead of abstract.',
-      'Spell out who is affected, what people are watching next, and which part is still unclear.',
-      'Add one small grounded reaction or joke without changing the facts, then pull the explanation back to what matters.',
+      `${topic}${source} is the story today, and the first beat says the actual update fast.`,
+      'The next beat explains what changed in plain English so the viewer does not need the article open.',
+      'Then show what is different from yesterday, last quarter, or the old expectation so the shift feels real.',
+      'Spell out who gets hit first, who benefits, and what people still do not know yet.',
+      'Add one light reaction if it fits, then bring it straight back to the facts.',
       `${profile.callToActionTemplate}`,
       `If you want tomorrow's simplified headline, come back for the next story.`,
       'Save this if you want the quick version without digging through ten articles.',
@@ -1217,11 +1245,11 @@ function buildLocalSceneIdeas(
 
   if (/retirement/.test(topicKey)) {
     return [
-      'Most retirement tool lists are too vague, so start with one specific use case: tracking contributions, fees, and account mix in one place.',
-      'Open a Roth IRA or 401k dashboard and check the concrete inputs that matter: contribution room, employer match, and expense ratio.',
-      'A useful tool should show what changes when you raise a monthly contribution from 200 to 300 and keep the same timeline.',
-      'The stronger option makes the comparison visible on one screen instead of forcing you to bounce between spreadsheets and account tabs.',
-      'The payoff is fewer blind spots, clearer tradeoffs, and a retirement plan you can actually review each month.',
+      'Most retirement tool videos stay vague. Start with one real job: tracking contributions, fees, and account mix in one place.',
+      'Open a Roth IRA or 401k dashboard and look for the numbers that actually matter: contribution room, employer match, and expense ratio.',
+      'A useful tool should show what changes when a monthly contribution goes from 200 to 300 on the same timeline.',
+      'The stronger option makes that comparison obvious on one screen instead of sending you back to spreadsheets and account tabs.',
+      'What you want at the end is fewer blind spots and a plan you can check in a few minutes each month.',
       `${profile.callToActionTemplate}`,
       `If you want the next practical topic, try ${nextTopic}.`,
       'Save this checklist and use it before you pick the next retirement tool.',
@@ -1230,11 +1258,11 @@ function buildLocalSceneIdeas(
 
   if (/real estate/.test(topicKey)) {
     return [
-      'The fastest way to judge a real estate investing tool is to see whether it clarifies one deal instead of overwhelming you with market noise.',
-      'Start with the concrete inputs: rent, vacancy, repairs, financing, and the cap rate or cash flow number the tool calculates from them.',
-      'A good dashboard should let you test one scenario, like higher interest or lower occupancy, without rebuilding the deal in a spreadsheet.',
-      'The better option replaces manual copy-paste with a repeatable deal review workflow you can run on every listing.',
-      'That gives you cleaner underwriting, faster go or no-go calls, and fewer bad assumptions hiding in the numbers.',
+      'The easiest way to judge a real estate investing tool is simple: can it help you read one deal without drowning you in noise.',
+      'Start with the real inputs: rent, vacancy, repairs, financing, and the cap rate or cash flow the tool spits out.',
+      'A good dashboard should let you test one change, like higher interest or lower occupancy, without rebuilding the whole deal in a spreadsheet.',
+      'The better option cuts out manual copy and paste and gives you a repeatable way to review every listing.',
+      'That means faster go or no-go calls and fewer bad assumptions hiding in the numbers.',
       `${profile.callToActionTemplate}`,
       `If you want the next practical topic, try ${nextTopic}.`,
       'Save this process and use it the next time a deal looks better than it really is.',
@@ -1243,11 +1271,11 @@ function buildLocalSceneIdeas(
 
   if (/seo|programmatic/.test(topicKey)) {
     return [
-      'Programmatic SEO only works when the workflow is concrete, so start with one page type, one keyword cluster, and one template.',
-      'The first screen to check is the keyword map: search intent, supporting terms, and the page pattern you can reuse safely.',
-      'A practical tool should show where pages are thin, where internal links are missing, and which template variables still need real data.',
-      'The stronger setup replaces random publishing with a repeatable content system that pairs templates, QA, and indexing checks.',
-      'That means fewer junk pages, cleaner coverage, and a programmatic SEO process you can scale without losing quality.',
+      'Programmatic SEO only works when the workflow is real, so start with one page type, one keyword cluster, and one template.',
+      'The first screen to check is the keyword map: search intent, support terms, and the page pattern you can safely repeat.',
+      'A practical tool should show where pages are thin, where internal links are missing, and which template fields still need real data.',
+      'The stronger setup replaces random publishing with a repeatable system that includes templates, QA, and indexing checks.',
+      'That gets you fewer junk pages and cleaner coverage when you scale.',
       `${profile.callToActionTemplate}`,
       `If you want the next practical topic, try ${nextTopic}.`,
       'Save this breakdown and use it before you scale another batch of pages.',
@@ -1256,11 +1284,11 @@ function buildLocalSceneIdeas(
 
   if (/crm|saas|workflow|automation/.test(topicKey)) {
     return [
-      `The useful way to judge ${topic} is to follow one lead or one task from start to finish, not to skim a feature list.`,
-      'Check the specific workflow: where the lead lands, who gets notified, what data is captured, and which step still needs human review.',
+      `The useful way to judge ${topic} is to follow one lead or one task from start to finish, not skim a feature list.`,
+      'Check the real workflow: where the lead lands, who gets pinged, what data gets saved, and which step still needs a human.',
       'A practical demo should show the trigger, the handoff, and the one screen where the team saves the most time.',
-      'The better option replaces spreadsheet follow-up and tab switching with a workflow that is visible, searchable, and easier to audit.',
-      'That gives you fewer dropped steps, clearer ownership, and a system the team can repeat without extra cleanup.',
+      'The better option cuts down spreadsheet follow-up and tab switching with a workflow you can actually track.',
+      'That gives you fewer dropped steps and clearer ownership.',
       `${profile.callToActionTemplate}`,
       `If you want the next practical topic, try ${nextTopic}.`,
       'Save this workflow and use it the next time a tool promises more than it proves.',
@@ -1268,14 +1296,14 @@ function buildLocalSceneIdeas(
   }
 
   return [
-    `Most people approach ${topic} backwards. Start with the payoff, not the buzzword.`,
-    `The real problem is usually too many steps, too many tabs, or the wrong tool for the job.`,
-    `The simplest version is to treat ${topic} as a workflow, not a one-off trick.`,
-    `Show the concrete screen, metric, or comparison that proves why the better option saves time.`,
-    `The payoff is less friction, clearer output, and a process that is easier to repeat.`,
+    `${topic} gets framed in a vague way too often, so start with the real use case instead of the buzzword.`,
+    'Usually the problem is simple: too many steps, too many tabs, or the wrong tool for the job.',
+    `A cleaner way to explain ${topic} is to show it as a repeatable workflow, not a magic trick.`,
+    'Show the actual screen, metric, or comparison that proves why the better option saves time.',
+    'End on the real benefit: less friction and a process someone can repeat tomorrow.',
     `${profile.callToActionTemplate}`,
     `If you want the next practical topic, try ${nextTopic}.`,
-    `Save this workflow and use it the next time you need a simpler path.`,
+    'Save this workflow and use it the next time you need a simpler path.',
   ].slice(0, sceneCount);
 }
 
@@ -1356,13 +1384,16 @@ function resolveTargetDurationSeconds(
     Math.ceil(estimatedNarrationSeconds + 2)
   );
   const requestedDurationSeconds =
-    typeof requestedTotalDurationSeconds === 'number' && Number.isFinite(requestedTotalDurationSeconds)
+    typeof requestedTotalDurationSeconds === 'number' &&
+    Number.isFinite(requestedTotalDurationSeconds)
       ? Math.max(minimumDurationSeconds, Math.round(requestedTotalDurationSeconds))
       : null;
 
   return Math.min(
     maxDurationSeconds,
-    requestedDurationSeconds ? Math.min(requestedDurationSeconds, naturalDurationSeconds) : naturalDurationSeconds
+    requestedDurationSeconds
+      ? Math.min(requestedDurationSeconds, naturalDurationSeconds)
+      : naturalDurationSeconds
   );
 }
 
@@ -1407,13 +1438,23 @@ function validateScriptDirectionQuality(
       throw new Error('Script contains generic filler language and must be more concrete.');
     }
     if (JARGON_HEAVY_PATTERN.test(scene.text)) {
-      throw new Error('Script uses jargon-heavy language and must be rewritten in simpler English.');
+      throw new Error(
+        'Script uses jargon-heavy language and must be rewritten in simpler English.'
+      );
     }
     if (ROBOTIC_TRANSITION_PATTERN.test(scene.text)) {
       throw new Error('Script sounds robotic and must use more natural spoken phrasing.');
     }
-    if (INTERNAL_FALLBACK_PATTERN.test(scene.text) || INTERNAL_FALLBACK_PATTERN.test(scene.visualQuery)) {
-      throw new Error('Script contains internal fallback placeholder language and must be regenerated.');
+    if (AI_CLICHE_PATTERN.test(scene.text)) {
+      throw new Error('Script uses generic AI-style phrasing and needs a more human rewrite.');
+    }
+    if (
+      INTERNAL_FALLBACK_PATTERN.test(scene.text) ||
+      INTERNAL_FALLBACK_PATTERN.test(scene.visualQuery)
+    ) {
+      throw new Error(
+        'Script contains internal fallback placeholder language and must be regenerated.'
+      );
     }
     if (GENERIC_ANY_TOPIC_PATTERN.test(scene.text)) {
       throw new Error('Script sounds interchangeable and must be rewritten with sharper detail.');
@@ -1425,7 +1466,10 @@ function validateScriptDirectionQuality(
     throw new Error('Opening scene is too generic and needs a stronger hook.');
   }
 
-  const nonFinalScenes = scriptPackage.scenes.slice(1, Math.max(2, scriptPackage.scenes.length - 1));
+  const nonFinalScenes = scriptPackage.scenes.slice(
+    1,
+    Math.max(2, scriptPackage.scenes.length - 1)
+  );
   const hasConcreteDemo = nonFinalScenes.some((scene) => hasConcreteSceneSignal(scene.text));
   if (!hasConcreteDemo) {
     throw new Error('Script must include at least one practical comparison or concrete example.');
@@ -1444,15 +1488,18 @@ function validateScriptDirectionQuality(
   }
 
   if (contentBrief?.exactEvidenceRequired) {
-    const hasAnchoredScene = scriptPackage.scenes.some((scene) =>
-      contentBrief.keyEntities.some((entity) => scene.text.toLowerCase().includes(entity.toLowerCase())) ||
-      contentBrief.evidence.items.some((item) =>
-        item.title
-          .toLowerCase()
-          .split(/\s+/)
-          .filter((token) => token.length > 4)
-          .some((token) => scene.text.toLowerCase().includes(token))
-      )
+    const hasAnchoredScene = scriptPackage.scenes.some(
+      (scene) =>
+        contentBrief.keyEntities.some((entity) =>
+          scene.text.toLowerCase().includes(entity.toLowerCase())
+        ) ||
+        contentBrief.evidence.items.some((item) =>
+          item.title
+            .toLowerCase()
+            .split(/\s+/)
+            .filter((token) => token.length > 4)
+            .some((token) => scene.text.toLowerCase().includes(token))
+        )
     );
 
     if (!hasAnchoredScene) {
@@ -1461,7 +1508,9 @@ function validateScriptDirectionQuality(
 
     for (const scene of scriptPackage.scenes) {
       if (FACTUAL_PLACEHOLDER_VISUAL_PATTERN.test(scene.visualQuery)) {
-        throw new Error('Factual script requested a fake or generic visual instead of an exact visual target.');
+        throw new Error(
+          'Factual script requested a fake or generic visual instead of an exact visual target.'
+        );
       }
     }
   }
@@ -1497,7 +1546,8 @@ function hasConcreteSceneSignal(text: string): boolean {
     CONCRETE_ARTIFACT_PATTERN.test(text) ||
     NEWS_CONCRETE_PATTERN.test(text) ||
     (ACTIONABLE_VERB_PATTERN.test(text) && QUANTIFIED_DETAIL_PATTERN.test(text)) ||
-    (ACTIONABLE_VERB_PATTERN.test(text) && /\b(screen|tab|dashboard|calculator|template|report)\b/i.test(text))
+    (ACTIONABLE_VERB_PATTERN.test(text) &&
+      /\b(screen|tab|dashboard|calculator|template|report)\b/i.test(text))
   );
 }
 

@@ -49,6 +49,7 @@ export const AppEnvSchema = z.object({
   DEEPGRAM_API_KEY: z.string().optional(),
   PEXELS_API_KEY: z.string().optional(),
   PIXABAY_API_KEY: z.string().optional(),
+  VISUAL_PROVIDER_TIMEOUT_SECONDS: z.coerce.number().int().min(10).default(45),
   SCHEDULER_ENABLED: booleanFromEnvSchema.default(true),
   SCHEDULER_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).default(30),
   SCHEDULER_MAX_RETRIES: z.coerce.number().int().min(1).max(10).default(3),

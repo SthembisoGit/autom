@@ -122,11 +122,7 @@ function createPublishedJob(id: string, topic: string): GenerationJob {
   };
 }
 
-function createBaseJob(
-  id: string,
-  topic: string,
-  status: GenerationJob['status']
-): GenerationJob {
+function createBaseJob(id: string, topic: string, status: GenerationJob['status']): GenerationJob {
   return {
     id,
     profileId: 'profile_1',

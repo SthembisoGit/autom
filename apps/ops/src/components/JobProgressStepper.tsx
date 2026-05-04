@@ -52,7 +52,7 @@ export function JobProgressStepper({ progress }: { progress: JobProgress }) {
     ? 100
     : progress.stage === 'failed' || isCancelled
       ? Math.min(PROGRESS_STEPS[Math.max(0, currentIndex - 1)]?.percent ?? 0, 80)
-      : PROGRESS_STEPS[currentIndex]?.percent ?? 0;
+      : (PROGRESS_STEPS[currentIndex]?.percent ?? 0);
 
   const [displayedPercent, setDisplayedPercent] = useState(targetPercent);
   const displayedPercentRef = useRef(displayedPercent);

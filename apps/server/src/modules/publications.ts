@@ -142,8 +142,13 @@ export class PublicationsService {
       (platform) => mergedResultsByPlatform.get(platform)?.status === 'published'
     );
     const hasPendingPublication = hasPendingPublicationWork(mergedResults);
-    const finalStatus = allPublished ? 'published' : hasPendingPublication ? 'publish_pending' : 'failed';
-    const errorMessage = finalStatus === 'failed' ? summarizePublicationResults(mergedResults) : null;
+    const finalStatus = allPublished
+      ? 'published'
+      : hasPendingPublication
+        ? 'publish_pending'
+        : 'failed';
+    const errorMessage =
+      finalStatus === 'failed' ? summarizePublicationResults(mergedResults) : null;
     const updated = this.repository.updateJob({
       ...job,
       status: finalStatus,

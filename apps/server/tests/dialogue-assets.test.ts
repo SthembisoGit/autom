@@ -30,7 +30,10 @@ test('ensureDialogueCharacterRasters builds the layered studio_duo_v2 host pack'
 
     const basePixels = await sharp(rasterPack.hostA.base).ensureAlpha().raw().toBuffer();
     const alphaValues = Array.from(basePixels).filter((_, index) => index % 4 === 3);
-    assert.equal(alphaValues.some((value) => value > 0), true);
+    assert.equal(
+      alphaValues.some((value) => value > 0),
+      true
+    );
 
     const blinkPixels = await readFile(rasterPack.hostA.blink);
     const mouthPixels = await readFile(rasterPack.hostA.mouth.wide);

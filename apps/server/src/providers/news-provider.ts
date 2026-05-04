@@ -38,7 +38,11 @@ export class GoogleNewsRssProvider implements NewsProvider {
         return null;
       }
 
-      const fallbackIndex = selectStableIndex(profile.id, scheduledFor.toISOString(), filtered.length);
+      const fallbackIndex = selectStableIndex(
+        profile.id,
+        scheduledFor.toISOString(),
+        filtered.length
+      );
       return filtered[fallbackIndex] ?? null;
     }
 
@@ -122,7 +126,8 @@ function parseGoogleNewsRss(xml: string, query: string): NewsTopicContext[] {
     const snippet = decodeHtmlEntities(
       stripHtml(stripCdata(extractTag(itemXml, 'description') ?? '').trim())
     );
-    const sourceUrl = decodeHtmlEntities(stripCdata(extractTag(itemXml, 'link') ?? '').trim()) || null;
+    const sourceUrl =
+      decodeHtmlEntities(stripCdata(extractTag(itemXml, 'link') ?? '').trim()) || null;
     const publishedAt = normalizePublishedAt(extractTag(itemXml, 'pubDate'));
 
     items.push({
@@ -166,7 +171,10 @@ function splitHeadlineAndSource(value: string): {
 }
 
 function stripHtml(value: string): string {
-  return value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return value
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function decodeHtmlEntities(value: string): string {

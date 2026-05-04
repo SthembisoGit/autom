@@ -62,7 +62,9 @@ export class ContentOrchestrator {
     const verificationStatus =
       rerankResult.data.items.length === 0
         ? 'unverified'
-        : searchResult.provider === 'tavily' && rerankResult.provider === 'cohere' && !rerankResult.data.degraded
+        : searchResult.provider === 'tavily' &&
+            rerankResult.provider === 'cohere' &&
+            !rerankResult.data.degraded
           ? 'verified'
           : 'degraded';
 
@@ -135,7 +137,10 @@ export class ContentOrchestrator {
 }
 
 export class TavilySearchProvider implements SearchProvider {
-  constructor(private readonly apiKey: string, private readonly timeoutMs = 12_000) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly timeoutMs = 12_000
+  ) {}
 
   async collectEvidence(input: {
     profile: ContentProfile;
@@ -171,7 +176,9 @@ export class TavilySearchProvider implements SearchProvider {
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      throw new Error(`Tavily search failed with status ${response.status}.${body ? ` ${body}` : ''}`);
+      throw new Error(
+        `Tavily search failed with status ${response.status}.${body ? ` ${body}` : ''}`
+      );
     }
 
     const payload = (await response.json()) as TavilyResponse;
@@ -182,7 +189,10 @@ export class TavilySearchProvider implements SearchProvider {
     return {
       provider: 'tavily',
       data: mergeNewsContextEvidence(input.newsContext, evidence),
-      warnings: evidence.length === 0 ? ['Tavily returned no evidence; downstream steps will degrade.'] : [],
+      warnings:
+        evidence.length === 0
+          ? ['Tavily returned no evidence; downstream steps will degrade.']
+          : [],
     };
   }
 }
@@ -206,7 +216,9 @@ export class FallbackSearchProvider implements SearchProvider {
       data: evidence,
       warnings:
         evidence.length === 0
-          ? ['No live search provider configured, and no trusted evidence was available for this topic.']
+          ? [
+              'No live search provider configured, and no trusted evidence was available for this topic.',
+            ]
           : ['Using fallback evidence because Tavily is not configured.'],
       degraded: true,
     };
@@ -214,7 +226,10 @@ export class FallbackSearchProvider implements SearchProvider {
 }
 
 export class CohereRerankProvider implements RerankProvider {
-  constructor(private readonly apiKey: string, private readonly timeoutMs = 10_000) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly timeoutMs = 10_000
+  ) {}
 
   async rankEvidence(input: {
     profile: ContentProfile;
@@ -243,7 +258,9 @@ export class CohereRerankProvider implements RerankProvider {
           model: 'rerank-v3.5',
           query: buildSearchQuery(input.topic, input.newsContext),
           documents: input.evidence.map((item) =>
-            [item.title, item.snippet, item.sourceName, item.publishedAt].filter(Boolean).join(' | ')
+            [item.title, item.snippet, item.sourceName, item.publishedAt]
+              .filter(Boolean)
+              .join(' | ')
           ),
           top_n: Math.min(5, input.evidence.length),
         }),
@@ -259,7 +276,9 @@ export class CohereRerankProvider implements RerankProvider {
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      throw new Error(`Cohere rerank failed with status ${response.status}.${body ? ` ${body}` : ''}`);
+      throw new Error(
+        `Cohere rerank failed with status ${response.status}.${body ? ` ${body}` : ''}`
+      );
     }
 
     const payload = (await response.json()) as CohereRerankResponse;
@@ -274,10 +293,16 @@ export class CohereRerankProvider implements RerankProvider {
     return {
       provider: 'cohere',
       data: {
-        items: rankedItems.length > 0 ? rankedItems : heuristicRankEvidence(input.topic, input.newsContext, input.evidence),
+        items:
+          rankedItems.length > 0
+            ? rankedItems
+            : heuristicRankEvidence(input.topic, input.newsContext, input.evidence),
         degraded: rankedItems.length === 0,
       },
-      warnings: rankedItems.length === 0 ? ['Cohere returned no ranking results; heuristic ranking was used.'] : [],
+      warnings:
+        rankedItems.length === 0
+          ? ['Cohere returned no ranking results; heuristic ranking was used.']
+          : [],
       degraded: rankedItems.length === 0,
     };
   }
@@ -296,7 +321,10 @@ export class HeuristicRerankProvider implements RerankProvider {
         items: heuristicRankEvidence(input.topic, input.newsContext, input.evidence),
         degraded: true,
       },
-      warnings: input.evidence.length > 0 ? ['Using heuristic evidence ranking because Cohere is not configured.'] : [],
+      warnings:
+        input.evidence.length > 0
+          ? ['Using heuristic evidence ranking because Cohere is not configured.']
+          : [],
       degraded: true,
     };
   }
@@ -408,7 +436,9 @@ function heuristicRankEvidence(
   newsContext: NewsTopicContext | null,
   evidence: EvidenceItem[]
 ): EvidenceItem[] {
-  const queryTokens = tokenize([topic, newsContext?.title ?? '', newsContext?.snippet ?? ''].join(' '));
+  const queryTokens = tokenize(
+    [topic, newsContext?.title ?? '', newsContext?.snippet ?? ''].join(' ')
+  );
   return [...evidence]
     .sort((left, right) => scoreEvidence(right, queryTokens) - scoreEvidence(left, queryTokens))
     .slice(0, 5);
@@ -454,7 +484,11 @@ function inferContentType(
     return category.contentTypeBias;
   }
 
-  if (/\b(today|latest|breaking|update|announced|commission|election|minister|court|shares|earnings|tariff|outage|deal)\b/i.test(topic)) {
+  if (
+    /\b(today|latest|breaking|update|announced|commission|election|minister|court|shares|earnings|tariff|outage|deal)\b/i.test(
+      topic
+    )
+  ) {
     return 'recent_news';
   }
 
@@ -462,7 +496,10 @@ function inferContentType(
     return 'product_or_tool_demo';
   }
 
-  if (keyEntities.length > 0 && /\b(history|historical|legacy|president|mandela|war|empire)\b/i.test(topic)) {
+  if (
+    keyEntities.length > 0 &&
+    /\b(history|historical|legacy|president|mandela|war|empire)\b/i.test(topic)
+  ) {
     return 'historical_topic';
   }
 
@@ -499,7 +536,10 @@ function buildAngle(
   return `Turn "${anchor}" into a practical, specific explainer with one clear use case and one real takeaway.`;
 }
 
-function buildFactualClaims(newsContext: NewsTopicContext | null, evidence: EvidenceItem[]): string[] {
+function buildFactualClaims(
+  newsContext: NewsTopicContext | null,
+  evidence: EvidenceItem[]
+): string[] {
   const claims = evidence
     .slice(0, 4)
     .map((item) => [item.title, item.snippet].filter(Boolean).join(': '))
@@ -517,7 +557,10 @@ function buildDesiredVisuals(
   newsContext: NewsTopicContext | null,
   entities: string[]
 ): string[] {
-  return Array.from(new Set([topic, newsContext?.title ?? '', ...entities].filter(Boolean))).slice(0, 6);
+  return Array.from(new Set([topic, newsContext?.title ?? '', ...entities].filter(Boolean))).slice(
+    0,
+    6
+  );
 }
 
 function buildToneGuidance(
@@ -535,7 +578,9 @@ function buildToneGuidance(
   ];
 
   if (category) {
-    guidance.push(`Aim for ${category.platformFit}-first packaging with strong hold in the first 10 to 20 seconds.`);
+    guidance.push(
+      `Aim for ${category.platformFit}-first packaging with strong hold in the first 10 to 20 seconds.`
+    );
   }
 
   if (storyAngle) {

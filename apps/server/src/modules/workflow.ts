@@ -3,6 +3,7 @@ import type { CreateJobRequest, GenerationJob } from '@autom/contracts';
 
 import { cleanupJobArtifacts } from '../lib/artifacts.js';
 import { conflict, notFound } from '../lib/errors.js';
+import { WARNING_CODE, readWarningCode } from '../lib/warning-codes.js';
 import type {
   MediaRenderer,
   ScriptProvider,
@@ -88,7 +89,7 @@ export class WorkflowService {
           job.id,
           `Script generation required ${scriptMetadata.attemptCount} attempt(s)${
             scriptMetadata.repaired ? ' with repair handling' : ''
-          }.` 
+          }.`
         );
       }
 
@@ -142,11 +143,13 @@ export class WorkflowService {
         this.auditService.warn(job.id, warning);
       }
       const unresolvedFactualVisuals = visualSelection.warnings.filter((warning) =>
+        readWarningCode(warning) === WARNING_CODE.VISUAL_EXACT_NOT_FOUND ||
         /could not find an exact factual visual match/i.test(warning)
       );
       if (unresolvedFactualVisuals.length > 0) {
-        throw new Error(
-          `Visual selection could not find exact factual media for ${unresolvedFactualVisuals.length} scene(s).`
+        this.auditService.warn(
+          job.id,
+          `[${WARNING_CODE.VISUAL_EXACT_NOT_FOUND}] Visual selection missed exact factual media for ${unresolvedFactualVisuals.length} scene(s); proceeding with degraded visuals.`
         );
       }
 
@@ -178,6 +181,10 @@ export class WorkflowService {
           this.auditService.info(job.id, message);
         },
       });
+      const reviewPackageWithSelectionOutcomes = {
+        ...reviewPackage,
+        visualSelectionOutcomes: visualSelection.visualSelectionOutcomes,
+      };
       this.auditService.info(job.id, 'Review package rendered.');
       this.assertNotCancelled(job.id);
 
@@ -185,7 +192,7 @@ export class WorkflowService {
         ...workingJob,
         status: 'review_pending',
         manualClipBundle: null,
-        reviewPackage,
+        reviewPackage: reviewPackageWithSelectionOutcomes,
         errorMessage: null,
       });
     } catch (error) {

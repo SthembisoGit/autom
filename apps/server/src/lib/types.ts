@@ -2,8 +2,8 @@ import type { AppEnv, RuntimePaths } from '@autom/config';
 import type {
   AssetReference,
   ContentCategory,
-  ContentProfile,
   ContentMode,
+  ContentProfile,
   GenerationJob,
   Platform,
   PlatformConnection,
@@ -11,6 +11,7 @@ import type {
   ReviewPackage,
   ScriptGenerationMetadata,
   ScriptPackage,
+  VisualSelectionOutcome,
 } from '@autom/contracts';
 
 export type SceneNarrationTiming = {
@@ -235,6 +236,7 @@ export interface VisualProvider {
     selectedVisualQueries: string[];
     assetReferences: AssetReference[];
     warnings: string[];
+    visualSelectionOutcomes: VisualSelectionOutcome[];
   }>;
 }
 

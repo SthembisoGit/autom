@@ -231,7 +231,9 @@ test('FfmpegRenderer composes footage, narration, subtitles, and thumbnail outpu
     assert.equal(Boolean(previewCall), true);
     assert.equal(previewCall?.args.includes(sourceVideoPath), true);
     assert.equal(
-      previewCall?.args.some((value) => value.includes('FontSize=14') && value.includes('MarginV=56')),
+      previewCall?.args.some(
+        (value) => value.includes('FontSize=13') && value.includes('MarginV=40')
+      ),
       true
     );
 
@@ -288,8 +290,7 @@ test('FfmpegRenderer uses narration timeline to split subtitles into readable cu
         scenes: [
           {
             order: 1,
-            text:
-              'This subtitle test uses a much longer sentence so the renderer must break it into smaller, readable cues instead of one oversized paragraph on screen.',
+            text: 'This subtitle test uses a much longer sentence so the renderer must break it into smaller, readable cues instead of one oversized paragraph on screen.',
             visualQuery: 'subtitle wrapping test',
             durationSeconds: 12,
           },
@@ -319,7 +320,10 @@ test('FfmpegRenderer uses narration timeline to split subtitles into readable cu
     assert.equal(reviewPackage.renderBundle.renderedDurationSeconds, 12);
     assert.equal(reviewPackage.renderBundle.narrationDurationSeconds, null);
     assert.equal(reviewPackage.renderBundle.subtitleTimingSource, 'voice_timeline');
-    assert.equal(contentLines.every((line) => line.length <= 32), true);
+    assert.equal(
+      contentLines.every((line) => line.length <= 32),
+      true
+    );
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
@@ -483,7 +487,7 @@ test('FfmpegRenderer surfaces which render step timed out', async () => {
   const runtimePaths = createRuntimePaths(workspaceRoot);
   const renderer = new FfmpegRenderer(async (command, _args, _cwd) => {
     if (command === 'fake-ffmpeg') {
-        throw new Error('fake-ffmpeg timed out after 600000ms.');
+      throw new Error('fake-ffmpeg timed out after 600000ms.');
     }
 
     return { stdout: '8.0\n', stderr: '' };
@@ -644,7 +648,10 @@ test('FfmpegRenderer renders dialogue scenes with character assets and Groq-time
         call.args.some((value) => /host-a[\\/].*base\.png$/i.test(value))
     );
     assert.equal(Boolean(dialogueSceneCall), true);
-    assert.equal(progressMessages.includes('Subtitle timing source used: groq_word_timestamps.'), true);
+    assert.equal(
+      progressMessages.includes('Subtitle timing source used: groq_word_timestamps.'),
+      true
+    );
     assert.equal(progressMessages.includes('Dialogue character preset used: studio_duo_v2.'), true);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });

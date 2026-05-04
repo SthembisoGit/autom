@@ -11,7 +11,7 @@ import { createApp } from '../src/app.js';
 import { writeArtifactFile } from '../src/lib/artifacts.js';
 import { bootstrap } from '../src/lib/bootstrap.js';
 import type { Publisher, ScriptProvider, VisualProvider, VoiceProvider } from '../src/lib/types.js';
-import { StubRenderer, type CommandRunner } from '../src/media/ffmpeg-renderer.js';
+import { type CommandRunner, StubRenderer } from '../src/media/ffmpeg-renderer.js';
 
 function buildTestEnv(
   workspaceRoot: string,
@@ -152,13 +152,14 @@ function createVisualProviderStub(): VisualProvider {
 function createScriptProviderStub(): ScriptProvider {
   return {
     async generate(profile, topic) {
+      const sceneCount = Math.max(profile.sceneCount, 6);
       return {
         scriptPackage: {
           id: `script_${topic.toLowerCase().replace(/\s+/g, '_')}`,
           title: `About ${topic}`,
           description: `A concise explainer about ${topic}.`,
           tags: ['explained', 'systems'],
-          scenes: Array.from({ length: profile.sceneCount }, (_, index) => ({
+          scenes: Array.from({ length: sceneCount }, (_, index) => ({
             order: index + 1,
             text:
               index === 0
@@ -168,7 +169,7 @@ function createScriptProviderStub(): ScriptProvider {
             durationSeconds: 4,
             visualMode: 'auto' as const,
           })),
-          totalDurationSeconds: profile.sceneCount * 4,
+          totalDurationSeconds: sceneCount * 4,
           dialogue: null,
         },
         scriptMetadata: {
@@ -198,7 +199,10 @@ function createScriptProviderStub(): ScriptProvider {
   };
 }
 
-function buildProfilePayload(profile: Record<string, unknown>, overrides?: Record<string, unknown>) {
+function buildProfilePayload(
+  profile: Record<string, unknown>,
+  overrides?: Record<string, unknown>
+) {
   return {
     name: profile.name,
     niche: profile.niche,
@@ -432,6 +436,10 @@ test('server workflow creates, reviews, and publishes a job', async () => {
     assert.equal(createdJob.scriptMetadata.provider, 'local');
     assert.equal(createdJob.scriptMetadata.promptVersion, 'local-script-template-v1');
     assert.equal(createResponse.json().reviewPackage.renderBundle.thumbnailPath !== null, true);
+    assert.equal(
+      Array.isArray(createResponse.json().reviewPackage.visualSelectionOutcomes),
+      true
+    );
     assert.equal(
       createResponse
         .json()
@@ -741,7 +749,8 @@ test('bootstrap upgrades an untouched tech profile to the daily news narration s
       contentCategories: seededProfile.contentCategories,
       defaultHashtags: ['finance', 'saas', 'automation', 'seo'],
       callToActionStyle: 'educational',
-      callToActionTemplate: 'Follow autoM Media for the next tool, strategy, or comparison worth knowing.',
+      callToActionTemplate:
+        'Follow autoM Media for the next tool, strategy, or comparison worth knowing.',
       callToActionGuardrails:
         'Keep the CTA short, honest, and product-led. Do not use fake urgency or promise personal, financial, or life-changing outcomes.',
       targetPlatforms: ['local', 'youtube'],
@@ -1177,7 +1186,10 @@ test('terminal runs can be archived and disappear from monitor and history lists
       url: '/history',
     });
     assert.equal(historyResponse.statusCode, 200);
-    assert.equal(historyResponse.json().some((job: { id: string }) => job.id === jobId), false);
+    assert.equal(
+      historyResponse.json().some((job: { id: string }) => job.id === jobId),
+      false
+    );
 
     const detailResponse = await app.inject({
       method: 'GET',
@@ -1640,10 +1652,7 @@ test('publish retries only retry unfinished platforms and preserve successful re
     });
     assert.equal(firstPublishResponse.statusCode, 200);
     assert.equal(firstPublishResponse.json().status, 'failed');
-    assert.match(
-      firstPublishResponse.json().errorMessage,
-      /TikTok upload failed/i
-    );
+    assert.match(firstPublishResponse.json().errorMessage, /TikTok upload failed/i);
     assert.equal(youtubePublisher.getPublishCount(), 1);
     assert.equal(tiktokPublisher.getPublishCount(), 1);
     assert.equal(facebookPublisher.getPublishCount(), 1);

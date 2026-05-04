@@ -328,8 +328,8 @@ export function DashboardContent({
             <p className="eyebrow">Automation</p>
             <h3>Scheduler summary</h3>
             <p className="card-intro muted">
-              Review cadence health, run the scheduler manually, and open profiles if schedules
-              need changes.
+              Review cadence health, run the scheduler manually, and open profiles if schedules need
+              changes.
             </p>
           </div>
           <StatusBadge status={schedulerBadgeStatus} />
@@ -350,7 +350,9 @@ export function DashboardContent({
           <div>
             <dt>Last tick started</dt>
             <dd>
-              {scheduler?.lastTickStartedAt ? formatDateTime(scheduler.lastTickStartedAt) : 'Not recorded'}
+              {scheduler?.lastTickStartedAt
+                ? formatDateTime(scheduler.lastTickStartedAt)
+                : 'Not recorded'}
             </dd>
           </div>
           <div>

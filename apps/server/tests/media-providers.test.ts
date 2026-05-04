@@ -9,17 +9,17 @@ import type { ScriptPackage } from '@autom/contracts';
 
 import { createDefaultProfile } from '../src/lib/default-profile.js';
 import {
-  buildDeepgramRequestTimeoutMs,
   DeepgramVoiceProvider,
+  buildDeepgramRequestTimeoutMs,
 } from '../src/providers/deepgram-provider.js';
 import { GroqTranscriptionProvider } from '../src/providers/groq-provider.js';
 import {
-  buildVisualScenePlan,
   CompositeVisualProvider,
   GoogleNewsContextVisualProvider,
   PexelsVisualProvider,
   PixabayVisualProvider,
   WikimediaCommonsProvider,
+  buildVisualScenePlan,
 } from '../src/providers/pexels-provider.js';
 
 type CommandCall = {
@@ -108,7 +108,10 @@ test('DeepgramVoiceProvider writes narration output into the runtime temp direct
 test('DeepgramVoiceProvider scales request timeout with narration length', () => {
   const shortTimeout = buildDeepgramRequestTimeoutMs('Short narration text.');
   const longTimeout = buildDeepgramRequestTimeoutMs(
-    Array.from({ length: 120 }, (_, index) => `Sentence ${index + 1} keeps the narration flowing.`).join(' ')
+    Array.from(
+      { length: 120 },
+      (_, index) => `Sentence ${index + 1} keeps the narration flowing.`
+    ).join(' ')
   );
 
   assert.ok(shortTimeout >= 60_000);
@@ -274,7 +277,10 @@ test('GroqTranscriptionProvider normalizes word timestamps from narration audio'
     assert.equal(result.assetReferences[0]?.provider, 'groq');
     assert.equal(result.warnings.length, 0);
     assert.match(
-      await readFile(join(runtimePaths.tempDirectory, 'job-groq', 'transcript', 'groq-transcript.json'), 'utf8'),
+      await readFile(
+        join(runtimePaths.tempDirectory, 'job-groq', 'transcript', 'groq-transcript.json'),
+        'utf8'
+      ),
       /hello/
     );
   } finally {
@@ -348,7 +354,7 @@ test('PexelsVisualProvider retries with fallback queries and downloads portrait 
     assert.notEqual(result.selectedVisualQueries[0], scriptPackage.scenes[0]?.visualQuery);
     assert.equal(
       await readFile(
-        join(runtimePaths.tempDirectory, 'job-visuals', 'visuals', 'scene-1-pexels.mp4'),
+        join(runtimePaths.tempDirectory, 'job-visuals', 'visuals', 'scene-1-pexels-1.mp4'),
         'utf8'
       ),
       'video-bytes'

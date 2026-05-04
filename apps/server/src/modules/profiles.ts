@@ -42,13 +42,15 @@ export class ProfilesService {
   }
 
   list(): ContentProfile[] {
-    return this.repository.listProfiles().map((profile) =>
-      this.repairProfile(
-        shouldRefreshDefaultProfile(profile)
-          ? migrateLegacyDefaultProfile(profile, this.listAvailablePlatforms())
-          : profile
-      )
-    );
+    return this.repository
+      .listProfiles()
+      .map((profile) =>
+        this.repairProfile(
+          shouldRefreshDefaultProfile(profile)
+            ? migrateLegacyDefaultProfile(profile, this.listAvailablePlatforms())
+            : profile
+        )
+      );
   }
 
   get(profileId: string): ContentProfile | null {

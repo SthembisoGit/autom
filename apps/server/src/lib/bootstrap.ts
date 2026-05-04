@@ -3,10 +3,10 @@ import type { Platform } from '@autom/contracts';
 
 import { cleanupJobArtifacts } from '../lib/artifacts.js';
 import {
+  type CommandRunner,
   FfmpegRenderer,
   StubRenderer,
   createProcessRunner,
-  type CommandRunner,
 } from '../media/ffmpeg-renderer.js';
 import { ArtifactsService } from '../modules/artifacts.js';
 import { AuditService } from '../modules/audit.js';
@@ -45,7 +45,7 @@ type BootstrapOptions = {
   env?: NodeJS.ProcessEnv;
   commandRunner?: CommandRunner;
   mediaRenderer?: MediaRenderer;
-  publishers?: Publisher[]; 
+  publishers?: Publisher[];
   newsProvider?: NewsProvider;
   scriptProvider?: ScriptProvider;
   voiceProvider?: VoiceProvider;

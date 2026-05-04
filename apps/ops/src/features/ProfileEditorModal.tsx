@@ -285,8 +285,8 @@ export function ProfileEditorModal({
                         value={category.contentTypeBias}
                         onChange={(event) =>
                           updateCategory(draft, updateDraft, index, {
-                            contentTypeBias:
-                              event.target.value as ContentCategory['contentTypeBias'],
+                            contentTypeBias: event.target
+                              .value as ContentCategory['contentTypeBias'],
                           })
                         }
                       >
@@ -413,9 +413,7 @@ export function ProfileEditorModal({
               <span>Character preset</span>
               <input
                 value={draft.dialogueCharacterPresetId}
-                onChange={(event) =>
-                  updateDraft({ dialogueCharacterPresetId: event.target.value })
-                }
+                onChange={(event) => updateDraft({ dialogueCharacterPresetId: event.target.value })}
               />
             </label>
 
@@ -679,7 +677,8 @@ function validateProfile(profile: ContentProfile, availableTargetPlatforms: Plat
     }
 
     if (
-      profile.dialogueHostAName.trim().toLowerCase() === profile.dialogueHostBName.trim().toLowerCase()
+      profile.dialogueHostAName.trim().toLowerCase() ===
+      profile.dialogueHostBName.trim().toLowerCase()
     ) {
       errors.dialogueHostBName = 'Dialogue hosts must be distinct.';
     }

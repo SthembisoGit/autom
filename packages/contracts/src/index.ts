@@ -47,11 +47,7 @@ export const SceneSpecSchema = z.object({
 });
 export type SceneSpec = z.infer<typeof SceneSpecSchema>;
 
-export const SceneVisualModeSchema = z.enum([
-  'auto',
-  'manual_veo_required',
-  'manual_veo_optional',
-]);
+export const SceneVisualModeSchema = z.enum(['auto', 'manual_veo_required', 'manual_veo_optional']);
 export type SceneVisualMode = z.infer<typeof SceneVisualModeSchema>;
 
 export const ContentModeSchema = z.enum(['narration', 'dialogue']);
@@ -195,7 +191,10 @@ export const AssetReferenceSchema = z.object({
   externalId: z.string().nullable(),
   sceneOrder: z.number().int().positive().nullable(),
   query: z.string().nullable(),
-  retrievalOrigin: z.enum(['news', 'entity', 'archive', 'stock', 'demo', 'research']).nullable().default(null),
+  retrievalOrigin: z
+    .enum(['news', 'entity', 'archive', 'stock', 'demo', 'research'])
+    .nullable()
+    .default(null),
   licenseLabel: z.string().nullable().default(null),
   rightsSummary: z.string().nullable().default(null),
   attributionRequired: z.boolean().default(false),
@@ -244,6 +243,32 @@ export const AssetBundleSchema = z.object({
 });
 export type AssetBundle = z.infer<typeof AssetBundleSchema>;
 
+export const VisualSelectionStatusSchema = z.enum([
+  'exact',
+  'relevant',
+  'fallback',
+  'unresolved',
+  'skipped',
+]);
+export type VisualSelectionStatus = z.infer<typeof VisualSelectionStatusSchema>;
+
+export const VisualSelectionOutcomeSchema = z.object({
+  sceneOrder: z.number().int().positive(),
+  sceneKind: z.enum([
+    'recent_news',
+    'named_person_or_event',
+    'historical_topic',
+    'place_or_institution',
+    'generic_business_or_lifestyle',
+    'product_or_tool_demo',
+  ]),
+  exactMatchRequired: z.boolean().default(false),
+  status: VisualSelectionStatusSchema,
+  providerFamily: z.enum(['news_context', 'wikimedia', 'pixabay', 'unsplash', 'pexels', 'demo']).nullable(),
+  selectedQuery: z.string().nullable().default(null),
+});
+export type VisualSelectionOutcome = z.infer<typeof VisualSelectionOutcomeSchema>;
+
 export const RenderSceneVisualProviderSchema = z.enum([
   'dialogue',
   'local',
@@ -288,6 +313,7 @@ export type RenderBundle = z.infer<typeof RenderBundleSchema>;
 export const ReviewPackageSchema = z.object({
   summary: z.string().min(1),
   warnings: z.array(z.string()).default([]),
+  visualSelectionOutcomes: z.array(VisualSelectionOutcomeSchema).default([]),
   renderBundle: RenderBundleSchema,
   assetBundle: AssetBundleSchema,
   generatedAt: z.string().min(1),

@@ -29,7 +29,8 @@ const UPGRADABLE_DEFAULT_PROFILE_SIGNATURES: DefaultProfileSignature[] = [
       'Your main task is to create a compelling, easy-to-understand video script for one of the supplied categories. Focus on great storytelling that will make someone watch the entire video. Use simple English. For business ideas, be specific and clever, not generic. For facts, find a surprising hook. For history, reveal something interesting. For news, explain a major trending story simply and clearly. CRITICAL FOR VISUALS: To prevent repeating stock footage, you MUST write highly specific and literal visual search queries for every scene. Never use generic terms like "history" or "business". Use highly distinct, specific descriptions like "1920s black and white street view", "animated chart showing business growth", or "close up on an ancient egyptian artifact".',
     defaultHashtags: ['didyouknow', 'history', 'businessideas', 'worldnews', 'explained'],
     callToActionStyle: 'community',
-    callToActionTemplate: "Follow for more fascinating stories and ideas you won't find anywhere else.",
+    callToActionTemplate:
+      "Follow for more fascinating stories and ideas you won't find anywhere else.",
     callToActionGuardrails:
       'Keep the CTA short, engaging, and focused on curiosity. Do not use fake urgency.',
   },
@@ -57,8 +58,7 @@ const UPGRADABLE_DEFAULT_PROFILE_SIGNATURES: DefaultProfileSignature[] = [
     defaultHashtags: ['stoicism', 'discipline', 'mindset', 'wealthhabits'],
     callToActionStyle: 'community',
     callToActionTemplate: 'Follow for practical discipline, focus, and money habit lessons.',
-    callToActionGuardrails:
-      'Keep the CTA reflective, grounded, and free from urgency or promises.',
+    callToActionGuardrails: 'Keep the CTA reflective, grounded, and free from urgency or promises.',
   },
 ];
 
@@ -141,7 +141,12 @@ export function createDefaultContentCategories(): ContentCategory[] {
       },
       hashtagStrategy:
         'Use 2 practical category tags and 1-2 tool or use-case tags. Skip generic hype tags.',
-      searchLenses: ['business tools', 'productivity tools', 'finance tools', 'automation software'],
+      searchLenses: [
+        'business tools',
+        'productivity tools',
+        'finance tools',
+        'automation software',
+      ],
       exampleTopics: [
         'The workflow tool that actually cuts admin work',
         'The money tool that makes one decision easier',
@@ -194,9 +199,13 @@ export function createDefaultContentCategories(): ContentCategory[] {
         maxSeconds: 270,
         longformEligible: false,
       },
-      hashtagStrategy:
-        'Use 1-2 history tags plus the exact person, place, or event when relevant.',
-      searchLenses: ['history explained', 'historical figure', 'archival story', 'power and leadership history'],
+      hashtagStrategy: 'Use 1-2 history tags plus the exact person, place, or event when relevant.',
+      searchLenses: [
+        'history explained',
+        'historical figure',
+        'archival story',
+        'power and leadership history',
+      ],
       exampleTopics: [
         'The historical decision that changed everything after it looked settled',
         'The leader everyone mentions but few explain correctly',
@@ -241,7 +250,8 @@ export function createDefaultProfile(
   return {
     id: 'profile_default',
     name: 'autoM Media',
-    niche: 'meta-first explainers for business, technology, current affairs, history, and practical life/work topics',
+    niche:
+      'meta-first explainers for business, technology, current affairs, history, and practical life/work topics',
     tone: 'clear, conversational, vivid, and human',
     visualStyle:
       'relevant factual visuals, archival imagery, real-world footage, clean product visuals, and simple editorial graphics',
@@ -252,7 +262,8 @@ export function createDefaultProfile(
     maxDurationSeconds: 180,
     defaultHashtags: ['explained', 'news', 'tech', 'business'],
     callToActionStyle: 'community',
-    callToActionTemplate: 'Follow for sharper explainers on the stories, people, and tools worth knowing.',
+    callToActionTemplate:
+      'Follow for sharper explainers on the stories, people, and tools worth knowing.',
     callToActionGuardrails:
       'Keep the CTA short, natural, and curiosity-led. No fake urgency or exaggerated promises.',
     affiliateLinkTemplate: '',
@@ -275,7 +286,9 @@ export function createDefaultProfile(
 }
 
 export function isLegacyDefaultProfile(profile: ContentProfile): boolean {
-  return UPGRADABLE_DEFAULT_PROFILE_SIGNATURES.some((signature) => matchesSignature(profile, signature));
+  return UPGRADABLE_DEFAULT_PROFILE_SIGNATURES.some((signature) =>
+    matchesSignature(profile, signature)
+  );
 }
 
 export function shouldRefreshDefaultProfile(profile: ContentProfile): boolean {

@@ -41,7 +41,10 @@ function buildTestEnv(
   };
 }
 
-function buildProfilePayload(profile: Record<string, unknown>, overrides?: Record<string, unknown>) {
+function buildProfilePayload(
+  profile: Record<string, unknown>,
+  overrides?: Record<string, unknown>
+) {
   return {
     name: profile.name,
     niche: profile.niche,

@@ -7,8 +7,8 @@ import type {
   JobMonitorResponse,
   Platform,
   PlatformConnection,
-  SchedulerRun,
   SchedulerOverview,
+  SchedulerRun,
   UpsertProfileRequest,
 } from '@autom/contracts';
 

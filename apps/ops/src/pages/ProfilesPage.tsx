@@ -224,12 +224,22 @@ export function ProfilesPage() {
 
                   <div className="profile-summary-chip-row">
                     <span className="profile-summary-chip">{profile.maxDurationSeconds}s max</span>
-                    <span className="profile-summary-chip">{formatContentModeLabel(profile.contentMode)}</span>
                     <span className="profile-summary-chip">
-                      {profile.contentCategories.filter((category) => category.enabled).length} categories
+                      {formatContentModeLabel(profile.contentMode)}
                     </span>
-                    <span className="profile-summary-chip">{formatPlatformLabel(profile.targetPlatforms[0])}{profile.targetPlatforms.length > 1 ? ` +${profile.targetPlatforms.length - 1}` : ''}</span>
-                    <span className="profile-summary-chip">CTA: {formatCtaLabel(profile.callToActionStyle)}</span>
+                    <span className="profile-summary-chip">
+                      {profile.contentCategories.filter((category) => category.enabled).length}{' '}
+                      categories
+                    </span>
+                    <span className="profile-summary-chip">
+                      {formatPlatformLabel(profile.targetPlatforms[0])}
+                      {profile.targetPlatforms.length > 1
+                        ? ` +${profile.targetPlatforms.length - 1}`
+                        : ''}
+                    </span>
+                    <span className="profile-summary-chip">
+                      CTA: {formatCtaLabel(profile.callToActionStyle)}
+                    </span>
                   </div>
 
                   <div className="action-bar">

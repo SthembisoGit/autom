@@ -121,8 +121,7 @@ export function RunDetailPage() {
             : {
                 tone: 'warning',
                 title: 'Publication retry in progress',
-                message:
-                  'The delivery step is still running. Review the platform messages below.',
+                message: 'The delivery step is still running. Review the platform messages below.',
               }
       );
       await load({ background: true });
@@ -331,8 +330,12 @@ export function RunDetailContent({
   const renderThumbnailPath = detail.job.reviewPackage?.renderBundle.thumbnailPath ?? null;
   const dialogueSpeakerNames = detail.job.reviewPackage?.renderBundle.dialogueSpeakerNames ?? [];
   const sceneVisualOutcomes = detail.job.reviewPackage?.renderBundle.sceneVisualOutcomes ?? [];
-  const canCancel = detail.job.status === 'drafting' || detail.job.status === 'cancelling' || detail.job.status === 'publish_pending';
-  const canArchive = !detail.job.archivedAt && ['failed', 'published', 'cancelled'].includes(detail.job.status);
+  const canCancel =
+    detail.job.status === 'drafting' ||
+    detail.job.status === 'cancelling' ||
+    detail.job.status === 'publish_pending';
+  const canArchive =
+    !detail.job.archivedAt && ['failed', 'published', 'cancelled'].includes(detail.job.status);
 
   return (
     <div className="stack">
@@ -384,7 +387,9 @@ export function RunDetailContent({
           </div>
           <div>
             <dt>Background bed</dt>
-            <dd>{detail.job.reviewPackage?.renderBundle.backgroundAudioPresent ? 'Present' : 'None'}</dd>
+            <dd>
+              {detail.job.reviewPackage?.renderBundle.backgroundAudioPresent ? 'Present' : 'None'}
+            </dd>
           </div>
         </div>
         <div className="action-bar">
@@ -562,7 +567,9 @@ export function RunDetailContent({
             </div>
             <div>
               <dt>Subtitle timing</dt>
-              <dd>{detail.job.reviewPackage?.renderBundle.subtitleTimingSource ?? 'Not recorded'}</dd>
+              <dd>
+                {detail.job.reviewPackage?.renderBundle.subtitleTimingSource ?? 'Not recorded'}
+              </dd>
             </div>
             <div>
               <dt>Scene outcomes</dt>
@@ -570,9 +577,7 @@ export function RunDetailContent({
             </div>
             <div>
               <dt>Speakers</dt>
-              <dd>
-                {dialogueSpeakerNames.length ? dialogueSpeakerNames.join(', ') : 'n/a'}
-              </dd>
+              <dd>{dialogueSpeakerNames.length ? dialogueSpeakerNames.join(', ') : 'n/a'}</dd>
             </div>
             <div>
               <dt>Generated</dt>
@@ -729,7 +734,9 @@ export function RunDetailContent({
                       {outcome.providerUsed}.
                     </p>
                   </div>
-                  <StatusBadge status={outcome.usedFallback ? 'pending_configuration' : 'published'} />
+                  <StatusBadge
+                    status={outcome.usedFallback ? 'pending_configuration' : 'published'}
+                  />
                 </div>
                 <dl className="detail-list detail-list-compact">
                   <div>

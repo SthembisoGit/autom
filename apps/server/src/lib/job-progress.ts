@@ -61,7 +61,9 @@ export function summarizePublicationResults(results: PublicationResult[]): strin
 
   const published = results.filter((result) => result.status === 'published');
   const failed = results.filter((result) => result.status === 'failed');
-  const pendingConfiguration = results.filter((result) => result.status === 'pending_configuration');
+  const pendingConfiguration = results.filter(
+    (result) => result.status === 'pending_configuration'
+  );
 
   if (published.length === 0 && failed.length === 0 && pendingConfiguration.length === 0) {
     return null;
@@ -86,7 +88,11 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
     job.publicationResults.length > 0 &&
     job.publicationResults.every((result) => result.status === 'published');
   const failureMessage =
-    job.errorMessage ?? latestErrorAudit?.message ?? publicationSummary ?? latestAudit?.message ?? null;
+    job.errorMessage ??
+    latestErrorAudit?.message ??
+    publicationSummary ??
+    latestAudit?.message ??
+    null;
   const retryableFailure = Boolean(failureMessage && isRetryableFailureMessage(failureMessage));
 
   if (!hasPendingPublication && job.publicationResults.length > 0) {
@@ -126,9 +132,7 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
     return JobProgressSchema.parse({
       stage: 'failed',
       title: retryableFailure ? 'Retry recommended' : 'Run failed',
-      detail:
-        failureMessage ??
-        'The workflow failed before review or publishing was completed.',
+      detail: failureMessage ?? 'The workflow failed before review or publishing was completed.',
       tone: 'danger',
       isTerminal: true,
       retryable: retryableFailure,
@@ -155,9 +159,7 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
     return JobProgressSchema.parse({
       stage: 'cancelling',
       title: 'Cancelling run',
-      detail:
-        latestAudit?.message ??
-        'The run is finishing its current safe step before it stops.',
+      detail: latestAudit?.message ?? 'The run is finishing its current safe step before it stops.',
       tone: 'warning',
       isTerminal: false,
       retryable: false,
@@ -239,8 +241,7 @@ export function deriveJobProgress(job: GenerationJob, audit: AuditEvent[]): JobP
       stage: 'publishing',
       title: 'Publishing in progress',
       detail:
-        latestAudit?.message ??
-        'The run is approved and waiting for publisher delivery to finish.',
+        latestAudit?.message ?? 'The run is approved and waiting for publisher delivery to finish.',
       tone: 'info',
       isTerminal: false,
       retryable: false,

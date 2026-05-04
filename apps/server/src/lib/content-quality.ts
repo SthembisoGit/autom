@@ -91,7 +91,7 @@ export function buildSubtitleCues(
   scenes: SubtitleScene[],
   timelineDurationSeconds: number,
   sceneTimeline?: SceneNarrationTiming[] | null,
-  transcriptWords?: TranscriptWordTiming[] | null,
+  transcriptWords?: TranscriptWordTiming[] | null
 ): SubtitleCue[] {
   if (scenes.length === 0) {
     return [];
@@ -112,7 +112,8 @@ export function buildSubtitleCues(
     (sceneTimeline ?? []).map((timing) => [timing.sceneOrder, timing] as const)
   );
   const sourceDurationSeconds = scenes.reduce((sum, scene) => sum + scene.durationSeconds, 0);
-  const fallbackScale = sourceDurationSeconds > 0 ? timelineDurationSeconds / sourceDurationSeconds : 1;
+  const fallbackScale =
+    sourceDurationSeconds > 0 ? timelineDurationSeconds / sourceDurationSeconds : 1;
 
   const cues: SubtitleCue[] = [];
   let elapsedSeconds = 0;
@@ -168,7 +169,8 @@ function buildTranscriptSubtitleCues(
 
   for (const word of words) {
     const candidate = [...currentChunk, word];
-    const candidateDuration = candidate[candidate.length - 1].endSeconds - candidate[0].startSeconds;
+    const candidateDuration =
+      candidate[candidate.length - 1].endSeconds - candidate[0].startSeconds;
     const candidateLines = wrapSubtitleLines(candidate.map((item) => item.word));
     const nextTurnOrder = null;
     const shouldFlush =
@@ -245,7 +247,9 @@ function buildSceneSubtitleCues(text: string, durationSeconds: number): Subtitle
 
   return chunks.map((chunk) => {
     const chunkDurationSeconds =
-      totalWords > 0 ? durationSeconds * (chunk.length / totalWords) : durationSeconds / chunks.length;
+      totalWords > 0
+        ? durationSeconds * (chunk.length / totalWords)
+        : durationSeconds / chunks.length;
     const startSeconds = sceneElapsedSeconds;
     const endSeconds = startSeconds + chunkDurationSeconds;
     sceneElapsedSeconds = endSeconds;

@@ -97,7 +97,10 @@ export class SchedulerService {
     }
 
     if (!['queued', 'retry_scheduled'].includes(run.status)) {
-      throw new AppError(409, `Scheduler run ${runId} cannot be cancelled from ${run.status} status.`);
+      throw new AppError(
+        409,
+        `Scheduler run ${runId} cannot be cancelled from ${run.status} status.`
+      );
     }
 
     const cancelled = this.repository.cancelSchedulerRun(
@@ -318,17 +321,22 @@ export class SchedulerService {
     return 'retry';
   }
 
-  private async resolveScheduledTopic(profile: ContentProfile, scheduledFor: Date): Promise<string> {
+  private async resolveScheduledTopic(
+    profile: ContentProfile,
+    scheduledFor: Date
+  ): Promise<string> {
     const category = chooseCategory(profile, buildTopicSelectionSeed(profile, scheduledFor));
 
     if (profile.topicSource !== 'daily_news') {
+      const topicSeed = buildTopicSelectionSeed(profile, scheduledFor);
       const candidate = chooseTopicCandidate(
         buildCategoryTopicCandidates(
           profile,
           category,
           null,
-          buildTopicSelectionSeed(profile, scheduledFor)
-        )
+          topicSeed
+        ),
+        `${topicSeed}:candidate`
       );
       return candidate?.title ?? profile.niche;
     }
@@ -345,20 +353,23 @@ export class SchedulerService {
         return newsTopic.title;
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown news topic resolution failure.';
+      const message =
+        error instanceof Error ? error.message : 'Unknown news topic resolution failure.';
       this.auditService.warn(
         null,
         `Daily news topic lookup failed for ${profile.id}; falling back to category seeds. ${message}`
       );
     }
 
+    const fallbackSeed = buildTopicSelectionSeed(profile, scheduledFor);
     const fallbackCandidate = chooseTopicCandidate(
       buildCategoryTopicCandidates(
         profile,
         category,
         null,
-        buildTopicSelectionSeed(profile, scheduledFor)
-      )
+        fallbackSeed
+      ),
+      `${fallbackSeed}:candidate`
     );
     return fallbackCandidate?.title ?? profile.niche;
   }

@@ -59,7 +59,11 @@ export class GroqTranscriptionProvider implements TranscriptionProvider {
     form.append('temperature', '0');
     form.append('timestamp_granularities[]', 'segment');
     form.append('timestamp_granularities[]', 'word');
-    form.append('file', new Blob([audioBytes], { type: 'audio/mpeg' }), basename(input.narrationPath));
+    form.append(
+      'file',
+      new Blob([audioBytes], { type: 'audio/mpeg' }),
+      basename(input.narrationPath)
+    );
 
     let response: Response;
     try {
@@ -88,7 +92,11 @@ export class GroqTranscriptionProvider implements TranscriptionProvider {
 
     const payload = (await response.json()) as GroqVerboseTranscript;
     const transcriptWords = normalizeTranscriptWords(payload);
-    const artifactDirectory = await ensureJobArtifactDirectory(input.runtimePaths, input.jobId, 'transcript');
+    const artifactDirectory = await ensureJobArtifactDirectory(
+      input.runtimePaths,
+      input.jobId,
+      'transcript'
+    );
     const transcriptPath = join(artifactDirectory, 'groq-transcript.json');
     await writeArtifactFile(transcriptPath, JSON.stringify(payload, null, 2));
 

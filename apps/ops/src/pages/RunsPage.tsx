@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import type { GenerationJob, JobMonitorResponse, SchedulerOverview, SchedulerRun } from '@autom/contracts';
+import type {
+  GenerationJob,
+  JobMonitorResponse,
+  SchedulerOverview,
+  SchedulerRun,
+} from '@autom/contracts';
 
 import { apiClient } from '../api/client';
 import { JobProgressStepper } from '../components/JobProgressStepper';
@@ -222,8 +227,7 @@ export function RunsPage() {
       pushToast({
         tone: 'danger',
         title: 'Cancel failed',
-        message:
-          value instanceof Error ? value.message : 'Unable to cancel the scheduled work.',
+        message: value instanceof Error ? value.message : 'Unable to cancel the scheduled work.',
       });
     } finally {
       setMutatingSchedulerRunId(null);
@@ -418,7 +422,10 @@ export function RunsContent({
         {monitor && monitor.failed.length > 0 ? (
           <div className="stack">
             {monitor.failed.map((entry) => (
-              <article className="card alert-card alert-card-danger run-row-card" key={entry.job.id}>
+              <article
+                className="card alert-card alert-card-danger run-row-card"
+                key={entry.job.id}
+              >
                 <div className="row-between">
                   <div className="stack stack-tight run-row-main">
                     <div>
@@ -488,13 +495,13 @@ export function RunsContent({
       </section>
 
       <section className="dashboard-section">
-          <div className="section-heading-row">
-            <div>
-              <p className="eyebrow">Completed</p>
+        <div className="section-heading-row">
+          <div>
+            <p className="eyebrow">Completed</p>
             <h3>Recently finished</h3>
-            </div>
-            <Link className="button button-secondary" to="/history">
-              Open history
+          </div>
+          <Link className="button button-secondary" to="/history">
+            Open history
           </Link>
         </div>
 
@@ -517,7 +524,9 @@ export function RunsContent({
                       </p>
                     </div>
                   </div>
-                  <StatusBadge status={job.status === 'publish_pending' ? 'published' : job.status} />
+                  <StatusBadge
+                    status={job.status === 'publish_pending' ? 'published' : job.status}
+                  />
                 </div>
                 <div className="action-bar">
                   <Link className="button button-secondary" to={`/runs/${job.id}`}>
@@ -539,7 +548,9 @@ export function RunsContent({
           </div>
         ) : (
           <article className="card compact-empty-card">
-            <p className="muted">Completed runs will appear here after the first publish finishes.</p>
+            <p className="muted">
+              Completed runs will appear here after the first publish finishes.
+            </p>
           </article>
         )}
       </section>
@@ -548,7 +559,9 @@ export function RunsContent({
 }
 
 function canCancelJob(job: GenerationJob) {
-  return job.status === 'drafting' || job.status === 'cancelling' || job.status === 'publish_pending';
+  return (
+    job.status === 'drafting' || job.status === 'cancelling' || job.status === 'publish_pending'
+  );
 }
 
 function canArchiveJob(job: GenerationJob) {

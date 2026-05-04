@@ -12,10 +12,10 @@ import {
   deriveJobProgress,
   hasPendingPublicationWork,
 } from '../lib/job-progress.js';
+import { nowIso } from '../lib/time.js';
 import type { AppRepository } from '../repositories/app-repository.js';
 import type { AuditService } from './audit.js';
 import type { WorkflowService } from './workflow.js';
-import { nowIso } from '../lib/time.js';
 
 export class JobsService {
   constructor(
@@ -45,9 +45,10 @@ export class JobsService {
   getMonitor(): JobMonitorResponse {
     const jobs = this.repository.listJobs();
     const active = jobs
-      .filter((job) =>
-        ['drafting', 'cancelling', 'review_pending', 'approved'].includes(job.status) ||
-        (job.status === 'publish_pending' && hasPendingPublicationWork(job.publicationResults))
+      .filter(
+        (job) =>
+          ['drafting', 'cancelling', 'review_pending', 'approved'].includes(job.status) ||
+          (job.status === 'publish_pending' && hasPendingPublicationWork(job.publicationResults))
       )
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .slice(0, 8)
@@ -107,7 +108,10 @@ export class JobsService {
     }
 
     if (job.status === 'drafting') {
-      this.auditService.warn(jobId, 'Cancel requested. The run will stop after the current safe step.');
+      this.auditService.warn(
+        jobId,
+        'Cancel requested. The run will stop after the current safe step.'
+      );
       return this.repository.updateJob({
         ...job,
         status: 'cancelling',
