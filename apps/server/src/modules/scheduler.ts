@@ -325,6 +325,11 @@ export class SchedulerService {
     profile: ContentProfile,
     scheduledFor: Date
   ): Promise<string> {
+    // Load topics used across ALL profiles in the last 7 days.
+    // Prevents the cross-profile duplication pattern that matches YouTube's
+    // "inauthentic content" enforcement heuristic (July 2025 policy update).
+    const crossProfileRecentTopics = this.repository.listRecentTopicsAcrossProfiles(7);
+
     const category = chooseCategory(profile, buildTopicSelectionSeed(profile, scheduledFor));
 
     if (profile.topicSource !== 'daily_news') {
@@ -334,7 +339,8 @@ export class SchedulerService {
           profile,
           category,
           null,
-          topicSeed
+          topicSeed,
+          crossProfileRecentTopics
         ),
         `${topicSeed}:candidate`
       );
@@ -344,13 +350,23 @@ export class SchedulerService {
     try {
       const newsTopic = await this.newsProvider.discoverTopic(profile, scheduledFor);
       if (newsTopic?.title) {
+        // Check cross-profile dedup for news topics too
+        const isDuplicate = crossProfileRecentTopics.some(
+          (recent) => recent.toLowerCase() === newsTopic.title.toLowerCase()
+        );
+        if (!isDuplicate) {
+          this.auditService.info(
+            null,
+            `News topic selected for ${profile.id}: "${newsTopic.title}"${
+              newsTopic.sourceName ? ` via ${newsTopic.sourceName}` : ''
+            }.`
+          );
+          return newsTopic.title;
+        }
         this.auditService.info(
           null,
-          `News topic selected for ${profile.id}: "${newsTopic.title}"${
-            newsTopic.sourceName ? ` via ${newsTopic.sourceName}` : ''
-          }.`
+          `News topic "${newsTopic.title}" skipped for ${profile.id} — already scheduled by another profile this week.`
         );
-        return newsTopic.title;
       }
     } catch (error) {
       const message =
@@ -367,7 +383,8 @@ export class SchedulerService {
         profile,
         category,
         null,
-        fallbackSeed
+        fallbackSeed,
+        crossProfileRecentTopics
       ),
       `${fallbackSeed}:candidate`
     );

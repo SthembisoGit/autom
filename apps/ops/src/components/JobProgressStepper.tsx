@@ -87,7 +87,10 @@ export function JobProgressStepper({ progress }: { progress: JobProgress }) {
   }, [isActive, targetPercent]);
 
   return (
-    <section className={`progress-stepper progress-stepper-${progress.tone}`}>
+    <section
+      className={`progress-stepper progress-stepper-${progress.tone}`}
+      style={{ '--stepper-step-count': PROGRESS_STEPS.length } as React.CSSProperties}
+    >
       <div className="progress-stepper-summary">
         <div>
           <p className="eyebrow">Live progress</p>

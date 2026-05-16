@@ -10,10 +10,10 @@ import type {
 } from '@autom/contracts';
 import { ReviewPackageSchema } from '@autom/contracts';
 
+import { findBackgroundAudioSource } from '../domains/production/audio-bed-service.js';
+import { buildAssetBundleReferences, buildSrt } from '../domains/production/subtitle-service.js';
 import {
   type SceneNarrationTiming,
-  buildSubtitleCues,
-  formatSrtTimestamp,
   getNarrationOvershootAllowanceSeconds,
 } from '../lib/content-quality.js';
 import { nowIso } from '../lib/time.js';
@@ -28,7 +28,7 @@ const VIDEO_HEIGHT = 1920;
 const VIDEO_FRAME_RATE = 30;
 const DEFAULT_COMMAND_TIMEOUT_MS = 600_000;
 const COMMAND_TIMEOUT_PER_SECOND_MS = 7_500;
-const VIDEO_ENCODING_PRESET = 'veryfast';
+const VIDEO_ENCODING_PRESET = 'medium';
 const { join } = await import('node:path');
 
 export type CommandRunner = (
@@ -240,30 +240,67 @@ export class FfmpegRenderer implements MediaRenderer {
     await writeFile(concatListPath, buildConcatFile(input.scriptPackage.scenes), 'utf8');
 
     const concatStartedAt = Date.now();
+    const sceneCount = input.scriptPackage.scenes.length;
     await input.onProgress?.('Concatenating rendered scenes.');
-    await this.runRenderCommand(
-      'Scene concatenation',
-      input.env.FFMPEG_PATH,
-      [
-        '-y',
-        '-f',
-        'concat',
-        '-safe',
-        '0',
-        '-i',
-        'scene-list.txt',
-        '-c:v',
-        'libx264',
-        '-preset',
-        VIDEO_ENCODING_PRESET,
-        '-pix_fmt',
-        'yuv420p',
-        '-an',
-        'assembled.mp4',
-      ],
-      sceneDirectory,
-      renderTimeoutMs
-    );
+
+    if (sceneCount <= 1) {
+      // Single scene — simple copy, no transition needed
+      await this.runRenderCommand(
+        'Scene concatenation',
+        input.env.FFMPEG_PATH,
+        [
+          '-y', '-f', 'concat', '-safe', '0', '-i', 'scene-list.txt',
+          '-c:v', 'libx264', '-preset', VIDEO_ENCODING_PRESET,
+          '-pix_fmt', 'yuv420p', '-an', 'assembled.mp4',
+        ],
+        sceneDirectory,
+        renderTimeoutMs
+      );
+    } else {
+      // Multi-scene — build xfade dissolve chain between every pair of scenes.
+      // Each dissolve is 0.25s — subtle enough not to obscure content but enough
+      // to eliminate the jarring hard-cut feel between archival and modern footage.
+      const DISSOLVE_DURATION = 0.25;
+      const sceneNames = input.scriptPackage.scenes.map((_, i) => `scene-${i + 1}.mp4`);
+      const inputs = sceneNames.flatMap((name) => ['-i', name]);
+
+      // Calculate offset for each xfade — offset is the sum of preceding scene
+      // durations minus dissolve overlaps already consumed.
+      let cumulativeOffset = 0;
+      const filterParts: string[] = [];
+
+      // Normalize all inputs to the same framerate and timebase before xfade.
+      // Mixed-framerate inputs (e.g. 25fps stock clips) cause xfade to fail.
+      for (let n = 0; n < sceneNames.length; n++) {
+        filterParts.push(`[${n}:v]fps=${VIDEO_FRAME_RATE},settb=1/${VIDEO_FRAME_RATE * 512}[v${n}norm]`);
+      }
+
+      for (let i = 0; i < sceneNames.length - 1; i++) {
+        const sceneDuration = resolvedSceneTimings[i]?.durationSeconds ?? 5;
+        cumulativeOffset += sceneDuration - DISSOLVE_DURATION;
+        const inputA = i === 0 ? `[v${i}norm]` : `[xf${i - 1}]`;
+        const inputB = `[v${i + 1}norm]`;
+        const outputLabel = i === sceneNames.length - 2 ? '[outv]' : `[xf${i}]`;
+        filterParts.push(
+          `${inputA}${inputB}xfade=transition=fade:duration=${DISSOLVE_DURATION}:offset=${cumulativeOffset.toFixed(3)}${outputLabel}`
+        );
+      }
+
+      await this.runRenderCommand(
+        'Scene concatenation with transitions',
+        input.env.FFMPEG_PATH,
+        [
+          '-y',
+          ...inputs,
+          '-filter_complex', filterParts.join(';'),
+          '-map', '[outv]',
+          '-c:v', 'libx264', '-preset', VIDEO_ENCODING_PRESET,
+          '-pix_fmt', 'yuv420p', '-an', 'assembled.mp4',
+        ],
+        sceneDirectory,
+        renderTimeoutMs
+      );
+    }
     await input.onProgress?.(
       `Render telemetry: scene concatenation completed in ${formatElapsedMs(
         Date.now() - concatStartedAt
@@ -391,7 +428,7 @@ export class FfmpegRenderer implements MediaRenderer {
                 input.durationSeconds,
                 outputName
               )
-          : buildFallbackSceneArgs(input.durationSeconds, outputName);
+            : buildFallbackSceneArgs(input.durationSeconds, outputName);
 
     await this.runRenderCommand(
       `Scene ${input.sceneOrder} render`,
@@ -460,69 +497,6 @@ export class StubRenderer implements MediaRenderer {
       generatedAt: nowIso(),
     });
   }
-}
-
-function buildAssetBundleReferences(
-  assetReferences: AssetReference[],
-  subtitlesPath: string
-): AssetReference[] {
-  return [
-    ...assetReferences,
-    {
-      kind: 'subtitle',
-      path: subtitlesPath,
-      label: 'Generated captions',
-      provider: 'system',
-      sourceUrl: null,
-      mimeType: 'application/x-subrip',
-      externalId: null,
-      sceneOrder: null,
-      query: null,
-      retrievalOrigin: null,
-      licenseLabel: null,
-      rightsSummary: null,
-      attributionRequired: false,
-      entityLabel: null,
-      matchQuality: null,
-      reuseStatus: null,
-    },
-  ];
-}
-
-function buildSrt(
-  scenes: Array<{ order: number; text: string; durationSeconds: number }>,
-  timelineDurationSeconds: number,
-  sceneNarrationTimeline: SceneNarrationTiming[] | null,
-  transcriptWords: TranscriptWordTiming[] | null
-): {
-  srt: string;
-  cueCount: number;
-  timingSource: 'voice_timeline' | 'scene_duration' | 'groq_word_timestamps';
-} {
-  const normalizedTimeline =
-    sceneNarrationTimeline && sceneNarrationTimeline.length > 0 ? sceneNarrationTimeline : null;
-  const cues = buildSubtitleCues(
-    scenes,
-    timelineDurationSeconds,
-    normalizedTimeline,
-    transcriptWords
-  );
-
-  return {
-    cueCount: cues.length,
-    timingSource: transcriptWords?.length
-      ? 'groq_word_timestamps'
-      : normalizedTimeline
-        ? 'voice_timeline'
-        : 'scene_duration',
-    srt: cues
-      .map((cue, index) => {
-        const start = formatSrtTimestamp(cue.startSeconds);
-        const end = formatSrtTimestamp(cue.endSeconds);
-        return `${index + 1}\n${start} --> ${end}\n${cue.text}\n`;
-      })
-      .join('\n'),
-  };
 }
 
 function scaleSceneTimeline(
@@ -672,6 +646,15 @@ function buildFootageSceneArgs(
   durationSeconds: number,
   outputName: string
 ): string[] {
+  // stream_loop -1 loops the clip to fill the scene duration.
+  // fade=in:0:15 adds a 0.5s (15 frame) fade-in that masks the loop seam when
+  // the clip is shorter than the scene — the loop restart is hidden under the fade.
+  // tpad=stop_mode=clone extends the clip by cloning the last frame if needed,
+  // preventing ffmpeg from stalling at end of stream before the trim completes.
+  const fadeFrames = Math.min(15, Math.floor(durationSeconds * VIDEO_FRAME_RATE * 0.08));
+  const scaleAndCrop = `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop=${VIDEO_WIDTH}:${VIDEO_HEIGHT}`;
+  const loopFadeFilter = `${scaleAndCrop},setsar=1,fps=${VIDEO_FRAME_RATE},fade=in:0:${fadeFrames}:alpha=0`;
+
   return [
     '-y',
     '-stream_loop',
@@ -682,7 +665,7 @@ function buildFootageSceneArgs(
     String(durationSeconds),
     '-an',
     '-vf',
-    `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop=${VIDEO_WIDTH}:${VIDEO_HEIGHT},setsar=1,fps=${VIDEO_FRAME_RATE}`,
+    loopFadeFilter,
     '-c:v',
     'libx264',
     '-preset',
@@ -695,12 +678,39 @@ function buildFootageSceneArgs(
   ];
 }
 
+/**
+ * Build an image scene with a varied Ken Burns motion effect.
+ *
+ * Rather than always zooming in from center (which looks identical across scenes),
+ * we vary the motion based on the output filename to deterministically pick one of
+ * four patterns: zoom-in from top-left, zoom-in from bottom-right, slow pan left,
+ * slow pan right. The result looks directed rather than templated.
+ */
 function buildImageSceneArgs(
   sourcePath: string,
   durationSeconds: number,
   outputName: string
 ): string[] {
   const totalFrames = Math.max(1, Math.ceil(durationSeconds * VIDEO_FRAME_RATE));
+  // Deterministic variation based on scene number extracted from outputName
+  const sceneNum = parseInt(outputName.match(/\d+/)?.[0] ?? '1', 10);
+  const motionVariant = sceneNum % 4;
+
+  // Each variant has a distinct motion feel:
+  // 0 — slow zoom in from top-left corner (news/serious content feel)
+  // 1 — slow zoom in from bottom-right corner (mirror of 0)
+  // 2 — slow horizontal pan left-to-right (documentary sweep)
+  // 3 — slow zoom in from center with slight pan (classic Ken Burns)
+  const zoompanExpr = [
+    // Variant 0: zoom in, anchor top-left
+    `zoompan=z='min(zoom+0.0006,1.12)':x='iw/2-(iw/zoom/2)-iw*0.04':y='ih/2-(ih/zoom/2)-ih*0.04':d=${totalFrames}:s=${VIDEO_WIDTH}x${VIDEO_HEIGHT}:fps=${VIDEO_FRAME_RATE}`,
+    // Variant 1: zoom in, anchor bottom-right
+    `zoompan=z='min(zoom+0.0006,1.12)':x='iw/2-(iw/zoom/2)+iw*0.04':y='ih/2-(ih/zoom/2)+ih*0.04':d=${totalFrames}:s=${VIDEO_WIDTH}x${VIDEO_HEIGHT}:fps=${VIDEO_FRAME_RATE}`,
+    // Variant 2: slow pan left-to-right, slight zoom
+    `zoompan=z='min(zoom+0.0003,1.06)':x='iw*0.04*(on/${totalFrames})':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${VIDEO_WIDTH}x${VIDEO_HEIGHT}:fps=${VIDEO_FRAME_RATE}`,
+    // Variant 3: classic center zoom
+    `zoompan=z='min(zoom+0.0007,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${VIDEO_WIDTH}x${VIDEO_HEIGHT}:fps=${VIDEO_FRAME_RATE}`,
+  ][motionVariant];
 
   return [
     '-y',
@@ -712,7 +722,7 @@ function buildImageSceneArgs(
     String(durationSeconds),
     '-an',
     '-vf',
-    `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop=${VIDEO_WIDTH}:${VIDEO_HEIGHT},zoompan=z='min(zoom+0.0008,1.14)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${VIDEO_WIDTH}x${VIDEO_HEIGHT}:fps=${VIDEO_FRAME_RATE},setsar=1`,
+    `scale=${VIDEO_WIDTH}:${VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop=${VIDEO_WIDTH}:${VIDEO_HEIGHT},${zoompanExpr},setsar=1`,
     '-c:v',
     'libx264',
     '-preset',
@@ -987,7 +997,7 @@ function buildPreviewArgs(input: {
     '-c:a',
     'aac',
     '-b:a',
-    '128k',
+    '192k',
     '-movflags',
     '+faststart',
     'preview.mp4',
@@ -1088,61 +1098,11 @@ function buildCaptionFilter(
       ? Math.max(36, VIDEO_HEIGHT - (subtitleSafeZone.top + subtitleSafeZone.height) + 8)
       : 40;
 
-  return `subtitles=captions.srt:force_style='FontName=Arial,FontSize=13,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=${marginV}'`;
-}
-
-async function findBackgroundAudioSource(
-  runCommand: CommandRunner,
-  ffprobePath: string,
-  assetReferences: AssetReference[],
-  cwd: string,
-  timeoutMs: number
-): Promise<string | null> {
-  for (const reference of assetReferences) {
-    if (reference.kind !== 'video') {
-      continue;
-    }
-
-    const hasAudio = await probeHasAudioStream(
-      runCommand,
-      ffprobePath,
-      reference.path,
-      cwd,
-      timeoutMs
-    ).catch(() => false);
-
-    if (hasAudio) {
-      return reference.path;
-    }
-  }
-
-  return null;
-}
-
-async function probeHasAudioStream(
-  runCommand: CommandRunner,
-  ffprobePath: string,
-  mediaPath: string,
-  cwd: string,
-  timeoutMs: number
-): Promise<boolean> {
-  const probe = await runCommand(
-    ffprobePath,
-    [
-      '-v',
-      'error',
-      '-select_streams',
-      'a',
-      '-show_entries',
-      'stream=index',
-      '-of',
-      'csv=p=0',
-      mediaPath,
-    ],
-    cwd,
-    timeoutMs
-  );
-  return probe.stdout.trim().length > 0;
+  // Caption style — 16pt bold, thick black outline, shadow, bottom-centre.
+  // Bold=1 improves readability on busy archival footage.
+  // Outline=3 + Shadow=1 creates strong contrast on any background colour.
+  // MarginV positions captions above the lower 3rd of screen to avoid cropping on Reels.
+  return `subtitles=captions.srt:force_style='FontName=Arial,FontSize=16,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=${marginV},MarginL=40,MarginR=40'`;
 }
 
 function formatFilterDuration(totalSeconds: number): string {

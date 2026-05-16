@@ -9,19 +9,34 @@ import type {
   VisualSelectionOutcome,
 } from '@autom/contracts';
 
-import { ensureJobArtifactDirectory, writeArtifactFile } from '../lib/artifacts.js';
-import { WARNING_CODE, withWarningCode } from '../lib/warning-codes.js';
 import type {
   ContentBrief,
   ProviderTaskResult,
   VisualCandidate,
   VisualProviderFamily,
-  VisualSceneKind,
   VisualScenePlan,
 } from '../domains/pipeline/types.js';
-import type { VisualProvider, VisualSceneProvider } from '../lib/types.js';
 import { createContentOrchestrator } from '../domains/research/content-orchestrator.js';
 import { createNewsProvider } from '../domains/research/news-provider.js';
+import { isExactVisualMatchRequired } from '../domains/visuals/visual-coverage.js';
+import {
+  buildCandidateReuseKey,
+  chooseBestVisualCandidate,
+  hasExactEntityMatch,
+  matchTerms,
+  scoreVisualCandidate,
+} from '../domains/visuals/visual-ranking.js';
+import {
+  buildVisualScenePlan,
+  classifySceneKind,
+} from '../domains/visuals/visual-source-planner.js';
+import { ensureJobArtifactDirectory, writeArtifactFile } from '../lib/artifacts.js';
+import type { VisualProvider, VisualSceneProvider } from '../lib/types.js';
+import { WARNING_CODE, withWarningCode } from '../lib/warning-codes.js';
+import { InternetArchiveVisualProvider } from './internet-archive-provider.js';
+import { NasaVisualProvider } from './nasa-provider.js';
+
+export { buildVisualScenePlan } from '../domains/visuals/visual-source-planner.js';
 
 const PEXELS_SEARCH_ENDPOINT = 'https://api.pexels.com/videos/search';
 const PIXABAY_VIDEO_ENDPOINT = 'https://pixabay.com/api/videos/';
@@ -117,16 +132,13 @@ type WikimediaImageInfoResponse = {
   };
 };
 
-type VisualPlannerResult = {
-  plan: VisualScenePlan;
-  warnings: string[];
-};
-
 type CompositeVisualProviderOptions = {
   pexels?: VisualSceneProvider | null;
   pixabay?: VisualSceneProvider | null;
   wikimedia?: VisualSceneProvider | null;
   newsContext?: VisualSceneProvider | null;
+  internetArchive?: VisualSceneProvider | null;
+  nasa?: VisualSceneProvider | null;
   contentBriefResolver?:
     | ((profile: ContentProfile, topic: string) => Promise<ContentBrief | null>)
     | null;
@@ -140,20 +152,19 @@ export class LocalVisualProvider implements VisualProvider {
     runtimePaths: RuntimePaths;
     excludeSceneOrders?: number[];
   }) {
-    const visualSelectionOutcomes: VisualSelectionOutcome[] = input.scriptPackage.scenes.map((scene) => {
-      const sceneKind = classifySceneKind(scene, null);
-      return {
-        sceneOrder: scene.order,
-        sceneKind,
-        exactMatchRequired:
-          sceneKind === 'recent_news' ||
-          sceneKind === 'named_person_or_event' ||
-          sceneKind === 'historical_topic',
-        status: 'fallback',
-        providerFamily: null,
-        selectedQuery: scene.visualQuery,
-      };
-    });
+    const visualSelectionOutcomes: VisualSelectionOutcome[] = input.scriptPackage.scenes.map(
+      (scene) => {
+        const sceneKind = classifySceneKind(scene, null);
+        return {
+          sceneOrder: scene.order,
+          sceneKind,
+          exactMatchRequired: isExactVisualMatchRequired(sceneKind),
+          status: 'fallback',
+          providerFamily: null,
+          selectedQuery: scene.visualQuery,
+        };
+      }
+    );
 
     return {
       selectedVisualQueries: input.scriptPackage.scenes.map((scene) => scene.visualQuery),
@@ -174,6 +185,8 @@ export class CompositeVisualProvider implements VisualProvider {
     this.sceneProviders = new Map(
       [
         options.newsContext ?? null,
+        options.internetArchive ?? null,
+        options.nasa ?? null,
         options.wikimedia ?? null,
         options.pixabay ?? null,
         options.pexels ?? null,
@@ -207,10 +220,7 @@ export class CompositeVisualProvider implements VisualProvider {
         visualSelectionOutcomes.push({
           sceneOrder: scene.order,
           sceneKind: skippedSceneKind,
-          exactMatchRequired:
-            skippedSceneKind === 'recent_news' ||
-            skippedSceneKind === 'named_person_or_event' ||
-            skippedSceneKind === 'historical_topic',
+          exactMatchRequired: isExactVisualMatchRequired(skippedSceneKind),
           status: 'skipped',
           providerFamily: null,
           selectedQuery: scene.visualQuery,
@@ -291,7 +301,9 @@ export class CompositeVisualProvider implements VisualProvider {
             : best.asset.matchQuality === 'relevant'
               ? 'relevant'
               : 'fallback',
-        providerFamily: best.providerFamily,
+        providerFamily: (best.providerFamily === 'internet_archive' || best.providerFamily === 'nasa')
+          ? null
+          : best.providerFamily,
         selectedQuery,
       });
       if (best.reuseBlockedCount > 0) {
@@ -394,12 +406,12 @@ export class PexelsVisualProvider implements VisualSceneProvider {
     const candidates: VisualCandidate[] = [];
     let candidateCount = 0;
 
-    for (const query of input.plan.queries.slice(0, 3)) {
+    for (const query of input.plan.queries.slice(0, 2)) {
       const response = await fetch(
         `${PEXELS_SEARCH_ENDPOINT}?query=${encodeURIComponent(query)}&per_page=5&orientation=portrait`,
         {
           headers: { Authorization: this.apiKey },
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: AbortSignal.timeout(8_000),
         }
       ).catch((error) => {
         if (isAbortError(error)) {
@@ -531,11 +543,11 @@ export class PixabayVisualProvider implements VisualSceneProvider {
     const candidates: VisualCandidate[] = [];
     let candidateCount = 0;
 
-    for (const query of input.plan.queries.slice(0, 3)) {
+    for (const query of input.plan.queries.slice(0, 2)) {
       const response = await fetch(
         `${PIXABAY_VIDEO_ENDPOINT}?key=${encodeURIComponent(this.apiKey)}&q=${encodeURIComponent(query)}&per_page=5`,
         {
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: AbortSignal.timeout(8_000),
         }
       ).catch((error) => {
         if (isAbortError(error)) {
@@ -546,7 +558,15 @@ export class PixabayVisualProvider implements VisualSceneProvider {
         throw error;
       });
 
-      if (!response?.ok) {
+      if (!response) {
+        continue;
+      }
+
+      if (!response.ok) {
+        if ([401, 403, 429].includes(response.status)) {
+          throw new Error(`Pixabay lookup failed with status ${response.status}. Check PIXABAY_API_KEY.`);
+        }
+        warnings.push(`Pixabay lookup failed for "${query}" (status ${response.status}).`);
         continue;
       }
 
@@ -911,6 +931,9 @@ export function createVisualProvider(
   const composite = new CompositeVisualProvider({
     contentBriefResolver,
     newsContext: options?.newsContext ?? new GoogleNewsContextVisualProvider(),
+    // Internet Archive and NASA are always available — no API key needed
+    internetArchive: options?.internetArchive ?? new InternetArchiveVisualProvider(timeoutMs),
+    nasa: options?.nasa ?? new NasaVisualProvider(),
     wikimedia: options?.wikimedia ?? new WikimediaCommonsProvider(timeoutMs),
     pixabay:
       options?.pixabay ??
@@ -921,278 +944,6 @@ export function createVisualProvider(
   });
 
   return composite;
-}
-
-export function buildVisualScenePlan(
-  scene: SceneSpec,
-  profile: ContentProfile,
-  contentBrief: ContentBrief | null
-): VisualPlannerResult {
-  const sceneKind = classifySceneKind(scene, contentBrief);
-  const querySet = buildPlannerQueries(scene, profile, contentBrief, sceneKind);
-  const keyEntities = extractVisualEntities(scene, contentBrief);
-  const exactMatchRequired =
-    sceneKind === 'recent_news' ||
-    sceneKind === 'named_person_or_event' ||
-    sceneKind === 'historical_topic';
-  const allowStockFallback =
-    sceneKind === 'generic_business_or_lifestyle' ||
-    sceneKind === 'product_or_tool_demo' ||
-    sceneKind === 'place_or_institution';
-
-  return {
-    plan: {
-      sceneOrder: scene.order,
-      sceneKind,
-      queries: querySet,
-      keyEntities,
-      preferredProviders: resolveProviderFamilies(sceneKind),
-      exactMatchRequired,
-      allowStockFallback,
-    },
-    warnings:
-      exactMatchRequired && keyEntities.length === 0
-        ? [`Scene ${scene.order} looks factual but no strong entity hints were resolved.`]
-        : [],
-  };
-}
-
-function classifySceneKind(scene: SceneSpec, contentBrief: ContentBrief | null): VisualSceneKind {
-  if (contentBrief?.contentType) {
-    return contentBrief.contentType;
-  }
-
-  const text = `${scene.text} ${scene.visualQuery}`.toLowerCase();
-  if (/\b(news|reported|announced|today|latest|update|headline)\b/.test(text)) {
-    return 'recent_news';
-  }
-  if (/\b(history|historical|legacy|mandela|president|war|empire)\b/.test(text)) {
-    return 'historical_topic';
-  }
-  if (/\b(tool|software|dashboard|app|platform|workflow|seo|crm|automation)\b/.test(text)) {
-    return 'product_or_tool_demo';
-  }
-  if (extractCapitalizedEntities(`${scene.text} ${scene.visualQuery}`).length > 0) {
-    return 'named_person_or_event';
-  }
-
-  return 'generic_business_or_lifestyle';
-}
-
-function buildPlannerQueries(
-  scene: SceneSpec,
-  profile: ContentProfile,
-  contentBrief: ContentBrief | null,
-  sceneKind: VisualSceneKind
-): string[] {
-  const evidenceQueries =
-    contentBrief?.evidence.items
-      .slice(0, 3)
-      .map((item) => item.title.trim())
-      .filter((value) => value.length > 0) ?? [];
-  const desiredVisualQueries = contentBrief?.desiredVisuals.slice(0, 2) ?? [];
-  const factualScene = [
-    'recent_news',
-    'named_person_or_event',
-    'historical_topic',
-    'place_or_institution',
-  ].includes(sceneKind);
-
-  return Array.from(
-    new Set(
-      [
-        ...extractEntityFocusedQueries(scene, contentBrief),
-        ...extractSceneSpecificQueries(scene),
-        ...evidenceQueries,
-        ...desiredVisualQueries,
-        scene.visualQuery,
-        normalizePlannerQuery(scene.text),
-        ...(factualScene
-          ? []
-          : [
-              `${profile.visualStyle} ${scene.visualQuery}`.trim(),
-              `${profile.niche} ${scene.text}`.replace(/[^\w\s]/g, ' ').trim(),
-            ]),
-      ].filter((value) => value && value.trim().length > 0)
-    )
-  ).slice(0, 5);
-}
-
-function extractSceneSpecificQueries(scene: SceneSpec): string[] {
-  const tokens = tokenize(scene.text).filter((token) => !VISUAL_QUERY_STOPWORDS.has(token));
-  const compactActionQuery = tokens.slice(0, 6).join(' ').trim();
-  const verbAnchoredQuery = tokens.slice(0, 3).concat(tokens.slice(-2)).join(' ').trim();
-
-  return [compactActionQuery, verbAnchoredQuery]
-    .map((value) => value.replace(/\s+/g, ' ').trim())
-    .filter((value) => value.length >= 8);
-}
-
-function extractEntityFocusedQueries(
-  scene: SceneSpec,
-  contentBrief: ContentBrief | null
-): string[] {
-  const entities = extractVisualEntities(scene, contentBrief);
-  if (entities.length === 0) {
-    return [];
-  }
-
-  return [
-    entities.join(' '),
-    `${entities[0]} ${scene.visualQuery}`,
-    `${entities[0]} ${scene.text}`.replace(/[^\w\s]/g, ' '),
-  ].map((value) => value.trim());
-}
-
-function extractVisualEntities(scene: SceneSpec, contentBrief: ContentBrief | null): string[] {
-  const entities = new Set<string>(contentBrief?.keyEntities ?? []);
-  for (const entity of extractCapitalizedEntities(`${scene.text} ${scene.visualQuery}`)) {
-    entities.add(entity);
-  }
-
-  return Array.from(entities).slice(0, 4);
-}
-
-function resolveProviderFamilies(sceneKind: VisualSceneKind): VisualProviderFamily[] {
-  switch (sceneKind) {
-    case 'recent_news':
-      return ['news_context', 'wikimedia', 'pixabay', 'pexels'];
-    case 'named_person_or_event':
-    case 'historical_topic':
-      return ['wikimedia', 'pixabay', 'pexels'];
-    case 'generic_business_or_lifestyle':
-      return ['pexels', 'pixabay', 'wikimedia'];
-    case 'product_or_tool_demo':
-      return ['pixabay', 'pexels', 'wikimedia'];
-    case 'place_or_institution':
-      return ['wikimedia', 'pixabay', 'pexels'];
-    default:
-      return ['pexels', 'pixabay', 'wikimedia'];
-  }
-}
-
-function chooseBestVisualCandidate(
-  candidates: VisualCandidate[],
-  plan: VisualScenePlan,
-  usedCandidateKeys: Set<string>
-): (VisualCandidate & { forcedReuse: boolean; reuseBlockedCount: number }) | null {
-  const sorted = [...candidates].sort((left, right) => right.score - left.score);
-  const uniqueCandidates = sorted.filter(
-    (candidate) => !usedCandidateKeys.has(buildCandidateReuseKey(candidate.asset))
-  );
-  const duplicateCount = sorted.length - uniqueCandidates.length;
-  const candidatePool = uniqueCandidates.length > 0 ? uniqueCandidates : sorted;
-  const forcedReuse = uniqueCandidates.length === 0 && sorted.length > 0;
-
-  const exact = candidatePool.find((candidate) => candidate.exactEntityMatch);
-  if (exact) {
-    return {
-      ...exact,
-      asset: {
-        ...exact.asset,
-        matchQuality: 'exact',
-        reuseStatus: forcedReuse ? 'forced_reuse' : 'unique',
-      },
-      forcedReuse,
-      reuseBlockedCount: duplicateCount,
-    };
-  }
-
-  if (plan.exactMatchRequired) {
-    const relevantFallback = candidatePool.find(
-      (candidate) =>
-        candidate.score >= 14 &&
-        (candidate.providerFamily === 'wikimedia' ||
-          candidate.providerFamily === 'news_context' ||
-          candidate.matchedTerms.length >= 2)
-    );
-    return relevantFallback
-      ? {
-          ...relevantFallback,
-          asset: {
-            ...relevantFallback.asset,
-            matchQuality: 'relevant',
-            reuseStatus: forcedReuse ? 'forced_reuse' : 'unique',
-          },
-          forcedReuse,
-          reuseBlockedCount: duplicateCount,
-        }
-      : null;
-  }
-
-  const fallback = candidatePool[0] ?? null;
-  return fallback
-    ? {
-        ...fallback,
-        asset: {
-          ...fallback.asset,
-          matchQuality: fallback.score >= 14 ? 'relevant' : 'fallback',
-          reuseStatus: forcedReuse ? 'forced_reuse' : 'unique',
-        },
-        forcedReuse,
-        reuseBlockedCount: duplicateCount,
-      }
-    : null;
-}
-
-function scoreVisualCandidate(
-  input: {
-    title: string;
-    snippet: string;
-    query: string;
-    retrievalOrigin: AssetReference['retrievalOrigin'];
-    mimeType: string | null;
-  },
-  plan: VisualScenePlan
-): number {
-  const haystack = `${input.title} ${input.snippet} ${input.query}`.toLowerCase();
-  let score = 0;
-
-  for (const query of plan.queries) {
-    for (const token of tokenize(query)) {
-      if (haystack.includes(token)) {
-        score += 3;
-      }
-    }
-  }
-
-  for (const entity of plan.keyEntities) {
-    if (haystack.includes(entity.toLowerCase())) {
-      score += 6;
-    }
-  }
-
-  if (input.retrievalOrigin === 'entity' || input.retrievalOrigin === 'news') {
-    score += 4;
-  }
-
-  if (input.retrievalOrigin === 'stock') {
-    score += plan.allowStockFallback ? 1 : -2;
-  }
-
-  if (input.mimeType?.startsWith('video/')) {
-    score += 2;
-  }
-
-  if (plan.sceneKind === 'recent_news' && input.retrievalOrigin === 'news') {
-    score += 3;
-  }
-
-  if (
-    ['recent_news', 'named_person_or_event', 'historical_topic'].includes(plan.sceneKind) &&
-    input.retrievalOrigin === 'stock'
-  ) {
-    score -= 2;
-  }
-
-  return score;
-}
-
-function normalizePlannerQuery(value: string): string {
-  return value
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function buildVisualAssetReference(input: {
@@ -1229,10 +980,6 @@ function buildVisualAssetReference(input: {
     matchQuality: null,
     reuseStatus: null,
   };
-}
-
-function buildCandidateReuseKey(asset: AssetReference): string {
-  return [asset.provider, asset.externalId ?? '', asset.sourceUrl ?? ''].join('|');
 }
 
 function selectBestPortraitFile(video: PexelsVideo): PexelsVideoFile | null {
@@ -1335,66 +1082,6 @@ function inferFileExtension(mimeType: string | null | undefined): string {
 
   return '.jpg';
 }
-
-function extractCapitalizedEntities(value: string): string[] {
-  return Array.from(
-    new Set(
-      value.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/g)?.map((match) => match.trim()) ?? []
-    )
-  );
-}
-
-function hasExactEntityMatch(haystack: string, entities: string[]): boolean {
-  const lowerHaystack = haystack.toLowerCase();
-  return entities.some((entity) => lowerHaystack.includes(entity.toLowerCase()));
-}
-
-function matchTerms(haystack: string, queries: string[]): string[] {
-  const lowerHaystack = haystack.toLowerCase();
-  return Array.from(
-    new Set(
-      queries.flatMap((query) => tokenize(query).filter((token) => lowerHaystack.includes(token)))
-    )
-  );
-}
-
-function tokenize(value: string): string[] {
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 2);
-}
-
-const VISUAL_QUERY_STOPWORDS = new Set([
-  'about',
-  'after',
-  'before',
-  'because',
-  'could',
-  'every',
-  'from',
-  'have',
-  'into',
-  'just',
-  'like',
-  'most',
-  'only',
-  'over',
-  'some',
-  'that',
-  'their',
-  'there',
-  'these',
-  'they',
-  'this',
-  'what',
-  'when',
-  'where',
-  'which',
-  'with',
-  'would',
-]);
 
 function stripHtml(value: string): string {
   return value

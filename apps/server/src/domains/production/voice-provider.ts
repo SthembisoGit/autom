@@ -1,5 +1,6 @@
 export {
   DeepgramVoiceProvider,
   LocalVoiceProvider,
+  buildDeepgramRequestTimeoutMs,
   createVoiceProvider,
-} from '../../providers/deepgram-provider.js';
+} from './narration-service.js';

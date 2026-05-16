@@ -1,8 +1,9 @@
 export {
   CohereRerankProvider,
   ContentOrchestrator,
+  ContentPipelineOrchestrator,
   FallbackSearchProvider,
   HeuristicRerankProvider,
   TavilySearchProvider,
   createContentOrchestrator,
-} from '../../providers/content-orchestrator.js';
+} from '../pipeline/content-pipeline-orchestrator.js';

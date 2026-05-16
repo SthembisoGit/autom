@@ -226,9 +226,11 @@ export function ReviewsContent({
             </div>
 
             {jobWarnings.length > 0 ? (
-              <p className="muted">
-                Review warnings: {formatCount(jobWarnings.length, 'warning')} before approval.
-              </p>
+              <div>
+                <span className="warning-count-chip">
+                  ⚠ {formatCount(jobWarnings.length, 'warning')} — review before approving
+                </span>
+              </div>
             ) : null}
 
             <ReviewActions

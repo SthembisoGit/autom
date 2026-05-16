@@ -66,11 +66,16 @@ export function DashboardPage() {
 
   const summaryCards = useMemo(
     () => [
-      { label: 'Profiles', value: summary?.totalProfiles ?? 0 },
-      { label: 'Enabled', value: summary?.enabledProfiles ?? 0 },
-      { label: 'Drafting', value: summary?.draftJobs ?? 0 },
-      { label: 'Pending review', value: summary?.reviewPendingJobs ?? 0 },
-      { label: 'Published', value: summary?.publishedJobs ?? 0 },
+       { label: 'Profiles', value: summary?.totalProfiles ?? 0, icon: '⚙', tone: 'default' as const },
+      { label: 'Enabled', value: summary?.enabledProfiles ?? 0, icon: '✓', tone: 'success' as const },
+      { label: 'Drafting', value: summary?.draftJobs ?? 0, icon: '⟳', tone: 'default' as const },
+      {
+        label: 'Pending review',
+        value: summary?.reviewPendingJobs ?? 0,
+        icon: '◉',
+        tone: ((summary?.reviewPendingJobs ?? 0) > 0 ? 'warning' : 'default') as 'warning' | 'default',
+      },
+      { label: 'Published', value: summary?.publishedJobs ?? 0, icon: '↑', tone: 'success' as const },
     ],
     [summary]
   );
@@ -144,7 +149,7 @@ type DashboardContentProps = {
   loadFailed: boolean;
   isRunningScheduler: boolean;
   schedulerBadgeStatus: string;
-  summaryCards: Array<{ label: string; value: number }>;
+ summaryCards: Array<{ label: string; value: number; icon?: string; tone?: 'default' | 'success' | 'warning' | 'danger' }>;
   onRetry: () => void;
   onRunScheduler: () => Promise<void>;
 };
@@ -161,15 +166,7 @@ export function DashboardContent({
   onRetry,
   onRunScheduler,
 }: DashboardContentProps) {
-  if (isLoading && !summary) {
-    return (
-      <StatePanel
-        description="Pulling the latest run counts, queue health, and scheduler status."
-        title="Loading overview"
-      />
-    );
-  }
-
+  // Error state takes visual priority — show it before anything else
   if (loadFailed && !summary) {
     return (
       <StatePanel
@@ -182,8 +179,48 @@ export function DashboardContent({
     );
   }
 
+  if (isLoading && !summary) {
+    return (
+      <StatePanel
+        description="Pulling the latest run counts, queue health, and scheduler status."
+        title="Loading overview"
+      />
+    );
+  }
+
   return (
     <div className="stack">
+      {/* Action-required banners — highest visual priority */}
+      {(summary?.reviewPendingJobs ?? 0) > 0 ? (
+        <div className="action-required-banner">
+          <div className="action-required-content">
+            <div className="action-required-icon" aria-hidden="true">⚠</div>
+            <div>
+              <p className="action-required-title">
+                {summary!.reviewPendingJobs} run{summary!.reviewPendingJobs !== 1 ? 's' : ''} waiting for approval
+              </p>
+              <p className="action-required-sub">Approve before publishing can proceed.</p>
+            </div>
+          </div>
+          <Link className="button button-primary" to="/reviews">Open review queue</Link>
+        </div>
+      ) : null}
+
+      {(monitor?.failed.length ?? 0) > 0 ? (
+        <div className="action-required-banner action-required-banner--danger">
+          <div className="action-required-content">
+            <div className="action-required-icon" aria-hidden="true">✕</div>
+            <div>
+              <p className="action-required-title">
+                {monitor!.failed.length} failed run{monitor!.failed.length !== 1 ? 's' : ''} need inspection
+              </p>
+              <p className="action-required-sub">Check error and last failed step before retrying.</p>
+            </div>
+          </div>
+          <Link className="button button-secondary" to="/runs">Open runs</Link>
+        </div>
+      ) : null}
+
       {summary && Object.values(summary).every((metricValue) => metricValue === 0) ? (
         <StatePanel
           description="Profiles are configured, but no content runs have been generated yet."
@@ -191,7 +228,15 @@ export function DashboardContent({
           tone="info"
         >
           <div className="action-bar">
-            <Link className="button button-primary" to="/profiles">
+            <button
+              className="button button-primary"
+              disabled={isRunningScheduler}
+              onClick={() => void onRunScheduler()}
+              type="button"
+            >
+              {isRunningScheduler ? 'Running scheduler...' : 'Run scheduler now'}
+            </button>
+            <Link className="button button-secondary" to="/profiles">
               Review profiles
             </Link>
             <Link className="button button-secondary" to="/connections">
@@ -210,7 +255,7 @@ export function DashboardContent({
         </div>
         <div className="grid">
           {summaryCards.map((item) => (
-            <StatCard key={item.label} label={item.label} value={item.value} />
+            <StatCard key={item.label} label={item.label} value={item.value} tone={item.tone} />
           ))}
         </div>
       </section>
@@ -233,8 +278,8 @@ export function DashboardContent({
                 <p className="summary-row-title">Pending review</p>
                 <p className="muted">
                   {summary?.reviewPendingJobs
-                    ? `${summary.reviewPendingJobs} run(s) are waiting for operator approval.`
-                    : 'No runs are waiting in the review queue.'}
+                    ? `${summary.reviewPendingJobs} run(s) waiting for approval.`
+                    : 'No runs waiting in the review queue.'}
                 </p>
               </div>
               <Link className="button button-secondary" to="/reviews">
@@ -264,7 +309,10 @@ export function DashboardContent({
                       <Link className="job-link" to={`/runs/${entry.job.id}`}>
                         {entry.job.topic}
                       </Link>
-                      <p className="muted">{entry.progress.title}</p>
+                      <p className="muted">
+                        {entry.progress.title}
+                        {entry.progress.detail ? ` — ${entry.progress.detail}` : ''}
+                      </p>
                     </div>
                     <StatusBadge status={entry.job.status} />
                   </div>
@@ -313,6 +361,14 @@ export function DashboardContent({
             <div className="stack stack-tight">
               <p className="muted">No active generation or publish jobs are running right now.</p>
               <div className="action-bar">
+                <button
+                  className="button button-primary"
+                  disabled={isRunningScheduler}
+                  onClick={() => void onRunScheduler()}
+                  type="button"
+                >
+                  {isRunningScheduler ? 'Running...' : 'Run scheduler now'}
+                </button>
                 <Link className="button button-secondary" to="/runs">
                   Open run monitor
                 </Link>
@@ -336,10 +392,14 @@ export function DashboardContent({
         </div>
 
         <div className="grid">
-          <StatCard label="Queued runs" value={scheduler?.queuedRuns ?? 0} />
-          <StatCard label="Active runs" value={scheduler?.activeRuns ?? 0} />
-          <StatCard label="Completed 24h" value={scheduler?.completedRuns24h ?? 0} />
-          <StatCard label="Failed 24h" value={scheduler?.failedRuns24h ?? 0} />
+          <StatCard label="Queued" value={scheduler?.queuedRuns ?? 0} />
+          <StatCard label="Active" value={scheduler?.activeRuns ?? 0} />
+          <StatCard label="Done 24h" value={scheduler?.completedRuns24h ?? 0} tone="success" />
+          <StatCard
+            label="Failed 24h"
+            value={scheduler?.failedRuns24h ?? 0}
+            tone={(scheduler?.failedRuns24h ?? 0) > 0 ? 'danger' : 'default'}
+          />
         </div>
 
         <div className="detail-list detail-list-compact">

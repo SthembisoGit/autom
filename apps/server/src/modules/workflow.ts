@@ -2,6 +2,7 @@ import type { AppEnv, RuntimePaths } from '@autom/config';
 import type { CreateJobRequest, GenerationJob } from '@autom/contracts';
 
 import { cleanupJobArtifacts } from '../lib/artifacts.js';
+import { withExponentialBackoff } from '../lib/retry.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { WARNING_CODE, readWarningCode } from '../lib/warning-codes.js';
 import type {
@@ -57,9 +58,9 @@ export class WorkflowService {
     try {
       this.assertNotCancelled(job.id);
       this.auditService.info(job.id, 'Script generation started.');
-      const { scriptPackage, scriptMetadata } = await this.scriptProvider.generate(
-        profile,
-        input.topic
+      const { scriptPackage, scriptMetadata } = await withExponentialBackoff(
+        () => this.scriptProvider.generate(profile, input.topic),
+        { maxAttempts: 2, baseDelayMs: 5_000, label: `script generation job ${job.id}` }
       );
       workingJob = {
         ...workingJob,

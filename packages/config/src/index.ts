@@ -47,6 +47,7 @@ export const AppEnvSchema = z.object({
   MISTRAL_SCRIPT_MODEL: z.string().min(1).default('mistral-small-latest'),
   MISTRAL_SCRIPT_TIMEOUT_SECONDS: z.coerce.number().int().min(15).default(45),
   DEEPGRAM_API_KEY: z.string().optional(),
+  GOOGLE_TTS_API_KEY: z.string().optional(),
   PEXELS_API_KEY: z.string().optional(),
   PIXABAY_API_KEY: z.string().optional(),
   VISUAL_PROVIDER_TIMEOUT_SECONDS: z.coerce.number().int().min(10).default(45),
@@ -143,6 +144,14 @@ export function hasLiveMistral(env: AppEnv): boolean {
 
 export function hasLiveDeepgram(env: AppEnv): boolean {
   return Boolean(env.DEEPGRAM_API_KEY);
+}
+
+export function hasLiveGoogleTts(env: AppEnv): boolean {
+  return Boolean(env.GOOGLE_TTS_API_KEY);
+}
+
+export function hasLiveVoice(env: AppEnv): boolean {
+  return hasLiveGoogleTts(env) || hasLiveDeepgram(env);
 }
 
 export function hasLivePexels(env: AppEnv): boolean {

@@ -24,7 +24,7 @@ type SubtitleCueDraft = SubtitleCue & {
 
 const MAX_SUBTITLE_LINE_LENGTH = 32;
 const MAX_SUBTITLE_LINES = 2;
-const MAX_SUBTITLE_CUE_DURATION_SECONDS = 4;
+const MAX_SUBTITLE_CUE_DURATION_SECONDS = 2.5;
 const NARRATION_WORDS_PER_SECOND = 2.2;
 const NARRATION_OVERSHOOT_RATIO = 0.15;
 const NARRATION_OVERSHOOT_MIN_SECONDS = 5;
@@ -120,7 +120,11 @@ export function buildSubtitleCues(
 
   for (const scene of scenes) {
     const explicitTiming = timelineBySceneOrder.get(scene.order);
-    const sceneStartSeconds = explicitTiming?.startSeconds ?? elapsedSeconds;
+    // Apply a small lead-in offset: subtitles appear 0.12s after the scene starts
+    // to account for the brief silence/breath before speech begins.
+    // This prevents the first subtitle cue appearing before the word is spoken.
+    const SCENE_LEAD_IN_SECONDS = 0.12;
+    const sceneStartSeconds = (explicitTiming?.startSeconds ?? elapsedSeconds) + SCENE_LEAD_IN_SECONDS;
     const sceneEndSeconds =
       explicitTiming?.endSeconds ??
       Math.min(timelineDurationSeconds, elapsedSeconds + scene.durationSeconds * fallbackScale);

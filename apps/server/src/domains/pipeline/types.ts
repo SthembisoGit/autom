@@ -95,6 +95,8 @@ export type VisualProviderFamily =
   | 'pixabay'
   | 'unsplash'
   | 'pexels'
+  | 'internet_archive'
+  | 'nasa'
   | 'demo';
 
 export type VisualScenePlan = {

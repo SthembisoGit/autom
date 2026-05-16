@@ -10,6 +10,73 @@ import { StatusBadge } from '../components/StatusBadge';
 import { type ToastInput, useToast } from '../components/Toast';
 import { formatPlatformLabel } from '../lib/platforms';
 
+
+const CRITICAL_WARNING_CODES = new Set([
+  'VISUAL_EXACT_NOT_FOUND',
+  'VISUAL_NO_CANDIDATE',
+  'RENDER_TIMEOUT',
+  'RENDER_FAILED',
+]);
+
+function isCriticalWarning(warning: string): boolean {
+  const match = warning.match(/^\[([A-Z0-9_]+)\]/);
+  return match ? CRITICAL_WARNING_CODES.has(match[1] ?? '') : false;
+}
+
+function WarningTriage({ warnings }: { warnings: string[] }) {
+  const [showAll, setShowAll] = React.useState(false);
+  const critical = warnings.filter(isCriticalWarning);
+  const info = warnings.filter((w) => !isCriticalWarning(w));
+
+  return (
+    <article className="card">
+      <div className="row-between">
+        <div>
+          <h3>Review warnings</h3>
+          <p className="muted">Check these items before approving the run.</p>
+        </div>
+        <span className="badge badge-warning">{warnings.length}</span>
+      </div>
+
+      {critical.length > 0 ? (
+        <div className="stack stack-tight">
+          <p className="warning-triage-label warning-triage-label--critical">
+            {critical.length} critical — resolve before approving
+          </p>
+          {critical.map((w) => (
+            <div className="warning-row warning-row--critical" key={w}>
+              <span className="warning-row-icon" aria-hidden="true">!</span>
+              <p className="warning-row-text">{w}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {info.length > 0 ? (
+        <div className="stack stack-tight">
+          {critical.length > 0 ? (
+            <p className="warning-triage-label">{info.length} informational</p>
+          ) : null}
+          {(showAll ? info : info.slice(0, 3)).map((w) => (
+            <div className="warning-row" key={w}>
+              <span className="muted">{w}</span>
+            </div>
+          ))}
+          {info.length > 3 && !showAll ? (
+            <button
+              className="button button-ghost"
+              onClick={() => setShowAll(true)}
+              type="button"
+            >
+              Show {info.length - 3} more
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
 export function RunDetailPage() {
   const { jobId = '' } = useParams();
   const [detail, setDetail] = useState<JobDetailResponse | null>(null);
@@ -381,6 +448,17 @@ export function RunDetailContent({
             <dt>Warnings</dt>
             <dd>{warnings.length}</dd>
           </div>
+          {detail.job.scriptPackage?.nextVideoSuggestion ? (
+            <div>
+              <dt>Watch next</dt>
+              <dd>
+                <span className="next-video-chip">
+                  <span className="next-video-chip-label">→</span>
+                  {detail.job.scriptPackage.nextVideoSuggestion}
+                </span>
+              </dd>
+            </div>
+          ) : null}
           <div>
             <dt>Assets</dt>
             <dd>{assetReferences.length}</dd>
@@ -445,6 +523,15 @@ export function RunDetailContent({
                     ? 'This failure looks transient. Retry once the machine or network is stable.'
                     : 'Open the details section to inspect the failure.'}
               </p>
+              {detail.job.errorMessage ? (
+                <div className="failed-step-hint">
+                  <span className="failed-step-label">Failed at: </span>
+                  <span className="failed-step-value">
+                    {inferFailedStep(detail.job.errorMessage, detail.progress.title)}
+                  </span>
+                  <p className="failed-step-message muted">{detail.job.errorMessage.slice(0, 200)}</p>
+                </div>
+              ) : null}
             </div>
             <StatusBadge status="failed" />
           </div>
@@ -697,22 +784,7 @@ export function RunDetailContent({
       ) : null}
 
       {warnings.length > 0 ? (
-        <article className="card">
-          <div className="row-between">
-            <div>
-              <h3>Review warnings</h3>
-              <p className="muted">Check these items before approving the run.</p>
-            </div>
-            <span className="badge badge-warning">{warnings.length}</span>
-          </div>
-          <div className="stack stack-tight">
-            {warnings.map((warning) => (
-              <p className="muted" key={warning}>
-                {warning}
-              </p>
-            ))}
-          </div>
-        </article>
+        <WarningTriage warnings={warnings} />
       ) : null}
 
       {sceneVisualOutcomes.length > 0 ? (
@@ -830,11 +902,26 @@ export function RunDetailContent({
             ) : null}
 
             {detail.audit.length > 0 ? (
-              <div className="stack">
+              <div>
                 {detail.audit.map((entry) => (
-                  <div key={`${entry.createdAt}-${entry.message}`}>
-                    <p>{entry.message}</p>
-                    <p className="muted">{formatDateTime(entry.createdAt)}</p>
+                  <div
+                    className="audit-entry"
+                    key={`${entry.createdAt}-${entry.message}`}
+                  >
+                    <span className="audit-timestamp">
+                      {formatTimeOnly(entry.createdAt)}
+                    </span>
+                    <span
+                      className={
+                        entry.level === 'warn'
+                          ? 'audit-level-warn'
+                          : entry.level === 'error'
+                            ? 'audit-level-error'
+                            : ''
+                      }
+                    >
+                      {entry.message}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -914,8 +1001,32 @@ export function RunDetailContent({
   );
 }
 
+function inferFailedStep(errorMessage: string, progressTitle: string): string {
+  const msg = errorMessage.toLowerCase();
+  if (msg.includes('script') || msg.includes('gemini') || msg.includes('groq') || msg.includes('generate')) return 'Script generation';
+  if (msg.includes('voice') || msg.includes('tts') || msg.includes('narration') || msg.includes('audio')) return 'Voice synthesis';
+  if (msg.includes('visual') || msg.includes('pexels') || msg.includes('pixabay') || msg.includes('archive') || msg.includes('nasa')) return 'Visual selection';
+  if (msg.includes('render') || msg.includes('ffmpeg') || msg.includes('video')) return 'Video render';
+  if (msg.includes('publish') || msg.includes('youtube') || msg.includes('facebook') || msg.includes('tiktok')) return 'Publishing';
+  if (msg.includes('review') || msg.includes('approve')) return 'Review gate';
+  // Fall back to progress title if no pattern matches
+  return progressTitle || 'Unknown step';
+}
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
+}
+
+function formatTime(value: string) {
+  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatTimeOnly(value: string) {
+  return new Date(value).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 function formatDurationSeconds(value: number | null, fallback = 'Not recorded') {

@@ -12,6 +12,7 @@ import {
 import { DIALOGUE_HOST_A_ID, isDialogueMode } from '../lib/dialogue.js';
 import type { DialogueTurnTiming, VoiceProvider } from '../lib/types.js';
 import { type CommandRunner, createProcessRunner } from '../media/ffmpeg-renderer.js';
+import { GoogleTtsVoiceProvider } from './google-tts-provider.js';
 
 const DEEPGRAM_TTS_ENDPOINT = 'https://api.deepgram.com/v1/speak';
 const DEEPGRAM_MIN_REQUEST_TIMEOUT_MS = 60_000;
@@ -261,6 +262,19 @@ export class DeepgramVoiceProvider implements VoiceProvider {
 }
 
 export function createVoiceProvider(env: AppEnv): VoiceProvider {
+  // Priority order:
+  // 1. Google TTS  — best free quality (Neural2, 1M chars/month free)
+  //    Get key: console.cloud.google.com → APIs & Services → Cloud Text-to-Speech API
+  // 2. Deepgram    — kept as fallback for users who already have a key set up
+  // 3. Local       — no audio, text-only transcript fallback
+  if (env.GOOGLE_TTS_API_KEY) {
+    return new GoogleTtsVoiceProvider(env.GOOGLE_TTS_API_KEY, {
+      ffmpegPath: env.FFMPEG_PATH,
+      ffprobePath: env.FFPROBE_PATH,
+      stitchTimeoutMs: env.FFMPEG_COMMAND_TIMEOUT_SECONDS * 1000,
+    });
+  }
+
   if (env.DEEPGRAM_API_KEY) {
     return new DeepgramVoiceProvider(env.DEEPGRAM_API_KEY, {
       ffmpegPath: env.FFMPEG_PATH,

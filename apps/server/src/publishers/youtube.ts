@@ -201,16 +201,35 @@ export class YoutubePublisher implements Publisher {
         version: 'v3',
         auth: client,
       });
+      // Build AI-disclosure description footer — required by YouTube policy for
+      // synthetic voice narration and AI-generated scripts (March 2024 onwards).
+      const nextVideoLine = job.scriptPackage?.nextVideoSuggestion
+        ? `\nWatch next: ${job.scriptPackage.nextVideoSuggestion}`
+        : '';
+
+      const aiDisclosureFooter = [
+        nextVideoLine,
+        '',
+        '---',
+        'Disclosure: This video uses AI-generated voice narration and AI-assisted scripting.',
+        'All facts are researched and reviewed before publication.',
+      ].join('\n');
+
       const uploadResponse = await youtube.videos.insert({
         part: ['snippet', 'status'],
         requestBody: {
           snippet: {
             title: buildShortCaption(job, 100),
-            description: job.scriptPackage?.description ?? job.topic,
+            // Append AI disclosure to every description — satisfies YouTube's
+            // synthetic content transparency requirement without relying solely
+            // on the Studio UI checkbox (belt-and-suspenders approach).
+            description: (job.scriptPackage?.description ?? job.topic) + aiDisclosureFooter,
             tags: job.scriptPackage?.tags ?? [],
           },
           status: {
             privacyStatus: 'public',
+            // Must be false for monetisation on non-children's content.
+            selfDeclaredMadeForKids: false,
           },
         },
         media: {

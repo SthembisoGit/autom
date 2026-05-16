@@ -9,18 +9,25 @@ import type {
 import { ScriptPackageSchema } from '@autom/contracts';
 
 import {
-  estimateNarrationDurationSeconds,
-  getNarrationOvershootAllowanceSeconds,
-} from '../lib/content-quality.js';
-import { applySceneVisualModes } from '../lib/dialogue.js';
-import type {
-  ContentBrief,
-  NewsTopicContext,
-} from '../domains/pipeline/types.js';
+  buildVideoKeywords,
+  normalizeTags,
+} from '../domains/editorial/packaging/hashtag-generator.js';
+import {
+  CONCRETE_SCENE_RULES,
+  MIN_SCENE_DURATION_SECONDS,
+  type ScenePlan,
+  allocateDurations,
+  deriveScenePlan,
+  resolveTargetDurationSeconds,
+  validateScriptDirectionQuality,
+  validateScriptTiming,
+} from '../domains/editorial/script-quality.js';
+import type { ContentBrief, NewsTopicContext } from '../domains/pipeline/types.js';
 import {
   type ContentOrchestrator,
   createContentOrchestrator,
 } from '../domains/research/content-orchestrator.js';
+import { applySceneVisualModes } from '../lib/dialogue.js';
 import type { NewsProvider, ScriptGenerationResult, ScriptProvider } from '../lib/types.js';
 
 const LOCAL_PROMPT_VERSION = 'local-script-template-v1';
@@ -33,73 +40,6 @@ const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 const DEFAULT_GROQ_REQUEST_TIMEOUT_MS = 45_000;
 const DEFAULT_MISTRAL_REQUEST_TIMEOUT_MS = 45_000;
-const MIN_SCENE_DURATION_SECONDS = 3;
-const MAX_VIDEO_TAGS = 8;
-const MAX_VIDEO_TAG_LENGTH = 40;
-const MAX_VIDEO_TAG_WORDS = 4;
-const VIDEO_TAG_STOPWORDS = new Set([
-  'a',
-  'an',
-  'and',
-  'as',
-  'at',
-  'be',
-  'by',
-  'for',
-  'from',
-  'in',
-  'into',
-  'is',
-  'it',
-  'of',
-  'on',
-  'or',
-  'the',
-  'that',
-  'to',
-  'with',
-  'without',
-]);
-const GENERIC_FILLER_PATTERNS = [
-  /\bin today's world\b/i,
-  /\bit's important to\b/i,
-  /\bthis shows that\b/i,
-  /\bthe key takeaway\b/i,
-  /\bgame changer\b/i,
-  /\bleverage\b/i,
-];
-const CONCRETE_SCENE_RULES = [
-  'Every scene must mention one concrete artifact: a named tool, workflow step, metric, comparison, or example.',
-  'Do not write general background paragraphs that could fit any topic.',
-  'Scene 1 should state the promise in plain language.',
-  'Middle scenes must add a distinct example, comparison, or step instead of repeating the same idea.',
-  'The final scene must summarize the payoff and then close with the CTA.',
-  'Avoid abstract filler words like opportunity, landscape, transformation, leverage, ecosystem, or game changer unless paired with a named example.',
-  'If the topic is broad, narrow it to a specific use case, tool, platform, or decision.',
-];
-const DIRECT_CONCRETE_DEMO_PATTERN =
-  /(for example|example|compare|comparison|instead of|before|after|workflow|step-by-step|demo|walkthrough|case study|scenario)/i;
-const CONCRETE_ARTIFACT_PATTERN =
-  /\b(tool|software|platform|dashboard|spreadsheet|calculator|template|checklist|playbook|crm|pipeline|keyword|campaign|ad set|report|account|pricing|trial|screen|tab|filter|metric|score|benchmark|ira|401k|portfolio|expense ratio|contribution|match|deal|rent|cash flow|cap rate|valuation|workflow|automation)\b/i;
-const ACTIONABLE_VERB_PATTERN =
-  /\b(use|open|check|track|map|export|filter|route|audit|review|test|compare|price|budget|rebalance|contribute|forecast|segment|score|calculate|screen|move|plug|sync|automate|trim|cluster)\b/i;
-const QUANTIFIED_DETAIL_PATTERN = /\b(?:\$?\d[\d,.]*%?|\d{4})\b/;
-const NEWS_CONCRETE_PATTERN =
-  /\b(according to|reported|announced|said|filed|launched|released|approved|blocked|acquired|raised|cut|tariff|market|shares|company|government|agency|minister|president|court|earnings|forecast|deal|merger|outage|update)\b/i;
-const INTERNAL_FALLBACK_PATTERN =
-  /\b(local fallback context|fallback context|entity disambiguation|manual workflow|records than|practical applications)\b/i;
-const FACTUAL_PLACEHOLDER_VISUAL_PATTERN =
-  /\b(bar chart|flowchart|dashboard|tool screenshot|manual workflow|comparison chart|split screen)\b/i;
-const BORING_SCENE_OPENING_PATTERN =
-  /^(today we|in this video|let's talk about|this is|here we|most people|when it comes to)\b/i;
-const GENERIC_ANY_TOPIC_PATTERN =
-  /\b(everything is changing|the world is moving fast|this matters more than ever|businesses are under pressure|people are paying attention)\b/i;
-const JARGON_HEAVY_PATTERN =
-  /\b(landscape|leverage|ecosystem|transformation|unlock|optimize|synergy|seamless|paradigm|frictionless|stakeholders|utilize)\b/i;
-const ROBOTIC_TRANSITION_PATTERN =
-  /\b(moreover|furthermore|additionally|in today's world|it is important to note|delve into|moving forward)\b/i;
-const AI_CLICHE_PATTERN =
-  /\b(the interesting part of|the real problem is|the payoff is|what most people miss|the simple version is|that means fewer|clearer output|process that is easier to repeat)\b/i;
 const GROQ_CHAT_COMPLETIONS_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const MISTRAL_CHAT_COMPLETIONS_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
 
@@ -223,12 +163,6 @@ type SceneDraft = {
   text: string;
   visualQuery: string;
   durationSeconds: number;
-};
-
-type ScenePlan = {
-  minSceneCount: number;
-  targetSceneCount: number;
-  maxSceneCount: number;
 };
 
 class MalformedScriptResponseError extends Error {
@@ -747,18 +681,49 @@ function buildGenerationPrompt(
     'Use contractions where they sound natural.',
     'A few short fragments are fine if they sound punchy when read aloud.',
     'Avoid generic filler language and keep every scene concrete.',
-    'Make the opening feel worth stopping for on Meta: lead with stakes, surprise, or a clean unresolved question.',
-    'Each new scene should add a fresh detail, contrast, or consequence. No scene should feel interchangeable.',
-    'Do not use lazy filler lines like "this matters because" unless you immediately explain a concrete consequence.',
+
+    // ── Hook formula — MANDATORY for Scene 1 ────────────────────────────
+    'Scene 1 MUST use one of these four opening formulas — choose the best fit, do not invent a fifth:',
+    '  Hook A — Contradiction: "[X] is [positive fact]. But [unexpected bad outcome]. Here is why."',
+    '  Hook B — Number: "[Specific statistic or count]. That is how many [thing]. And it changes how you think about [topic]."',
+    '  Hook C — Reversal: "Everyone believes [common assumption about topic]. The actual [data/record/evidence] says the opposite."',
+    '  Hook D — Stakes: "By [specific timeframe], [topic-related thing] will [significant change]. Most people will not see it coming."',
+    `Scene 1 must NOT open with: "In today's video", "Today we're going to", "Welcome back", "This is about", or any other preamble.`,
+    'Scene 1 must feel like something the viewer learned in the first 5 seconds — stop-the-scroll energy.',
+
+    // ── 3-beat structure ─────────────────────────────────────────────────
+    'Structure the full script as three beats:',
+    `  Beat 1 — Disruption (Scene 1): break the viewer's existing mental model with the hook.`,
+    '  Beat 2 — Evidence stack (middle scenes): escalate — each scene adds a new complication, stat, or consequence.',
+    `  Beat 3 — Reframe (final scene): deliver a perspective shift, not a summary. The viewer should feel they now see something others don't.`,
+
+    // ── Visual queries — documentary-style specificity REQUIRED ──────────
+    'Every visualQuery must describe a specific filmable scene as a documentary crew would record it.',
+    'Name the objects, people, actions, setting, and time of day if it matters.',
+    'Good: "cargo containers being unloaded at a harbour at dawn", "1970s factory workers on assembly line archival footage", "solar panels on a township rooftop", "trader watching multiple screens in a dark trading floor".',
+    'Bad: "economic activity", "technology background", "business concept", "success", "money and people".',
+    'Abstract nouns alone are not visual queries. Every query must anchor to something a camera can see.',
+
+    'Each new scene must add a fresh detail, contrast, or consequence — no scene should feel interchangeable with another.',
+    'Do not use lazy filler lines like "this matters because" unless you immediately follow with a concrete consequence.',
     'Avoid jargon like landscape, leverage, ecosystem, transformation, unlock, optimize, or synergy.',
     'Avoid robotic transitions like moreover, furthermore, additionally, and it is important to note.',
     'Avoid generic AI phrasing like "the interesting part is", "the real problem is", or "the payoff is".',
+
+    // ── Retention engineering (2026 algorithm research) ────────────────
+    `Midpoint retention trap (REQUIRED): At approximately the halfway scene of this script, include a genuinely surprising reveal, a counterintuitive finding, or a question the viewer desperately wants answered. This is the single highest-leverage moment for completion rate. Do not skip this.`,
+    'Forward hooks (REQUIRED): At the end of every other scene, include one sentence that teases what comes next. Examples: "But here is where it gets surprising.", "What happened next is something almost nobody expected.", "The next part is the one most people never hear about." Never repeat the same forward hook phrase. These keep viewers watching for the next 60-90 seconds.',
+
     ...CONCRETE_SCENE_RULES,
     'Each scene must include text, visualQuery, and durationSeconds.',
     'Keep each scene at least 3 seconds long.',
     'Keep each scene readable on a phone screen and avoid overlong caption blocks.',
+    // Binge-chain instruction — generates the watch-next suggestion for YouTube end screens
+    `Include a nextVideoSuggestion field: a single specific topic sentence describing what a viewer who enjoyed this video would want to watch next. It should be a natural follow-on — not a generic suggestion. Example: if this video is about South Africa's electricity grid history, a good nextVideoSuggestion is "Why South Africa's water infrastructure was designed the way it was in 1960". Bad: "Watch more videos about South Africa".`,
     `Tone: ${profile.tone}.`,
     `Content categories: ${joinOrNone(profile.contentCategories.map((category) => category.label))}.`,
+    `Local context required: ${profile.contentCategories.some((c) => c.localContextRequired) ? 'yes — ground the script in local or regional examples, prices, people, or events where relevant' : 'no'}.`,
+    `Scene 1 hook formula: ${profile.contentCategories[0]?.topicHookFormula && profile.contentCategories[0]?.topicHookFormula !== 'auto' ? profile.contentCategories[0].topicHookFormula : 'choose best fit from Hook A/B/C/D above'}.`,
     'Each tag must be a short keyword or short phrase, not a sentence.',
     'Keep every tag under 50 characters and avoid punctuation.',
     `CTA style: ${profile.callToActionStyle}.`,
@@ -873,7 +838,9 @@ function buildRepairPrompt(
     'Repair it so it satisfies the exact same JSON schema and constraints.',
     'Do not add commentary or markdown fences. Return JSON only.',
     `Topic: ${topic}.`,
-    `Allowed scene count: ${scenePlan.minSceneCount} to ${scenePlan.maxSceneCount}.`,
+    // Restate scene count constraint explicitly — the most common repair failure
+    // is returning too few scenes because the model forgets the limit mid-repair.
+    `REQUIRED scene count: minimum ${scenePlan.minSceneCount}, maximum ${scenePlan.maxSceneCount}. This is a hard constraint — do not return fewer than ${scenePlan.minSceneCount} scenes under any circumstances.`,
     `Target scene count: about ${scenePlan.targetSceneCount}.`,
     `Target total duration: ${profile.maxDurationSeconds} seconds.`,
     `Target roughly ${targetWordsTotal} spoken words total, or about ${targetWordsPerScene} words per scene.`,
@@ -1076,6 +1043,13 @@ function buildScriptResponseJsonSchema(profile: ContentProfile): Record<string, 
         minimum: scenePlan.minSceneCount * 3,
         maximum: profile.maxDurationSeconds,
       },
+      // A specific topic suggestion for the "watch next" end screen CTA.
+      // One sentence describing what a viewer who enjoyed this video would want to watch next.
+      // Example: "How South Africa's water infrastructure was designed in 1950"
+      // This enables YouTube's binge signal — the strongest growth driver for faceless channels.
+      nextVideoSuggestion: {
+        type: 'string',
+      },
     },
   };
 
@@ -1176,6 +1150,10 @@ function normalizeScriptDraft(
     })),
     totalDurationSeconds: resolvedTargetDurationSeconds,
     dialogue: null,
+    nextVideoSuggestion:
+      typeof record.nextVideoSuggestion === 'string' && record.nextVideoSuggestion.trim().length > 0
+        ? record.nextVideoSuggestion.trim()
+        : null,
   };
 
   const normalizedScriptPackage = applySceneVisualModes(profile, scriptPackage);
@@ -1207,16 +1185,6 @@ function normalizeSceneDraft(scene: unknown, index: number): SceneDraft {
     ),
     durationSeconds,
   };
-}
-
-function normalizeTags(input: unknown, profile: ContentProfile, topic: string): string[] {
-  const source = Array.isArray(input) ? input : [];
-  return buildVideoKeywords([
-    profile.niche,
-    topic,
-    ...profile.defaultHashtags,
-    ...source.flatMap((tag) => (typeof tag === 'string' ? splitTagSource(tag) : [])),
-  ]);
 }
 
 function buildLocalSceneIdeas(
@@ -1322,307 +1290,6 @@ function getPositiveNumber(input: unknown, message: string): number {
   }
 
   return input;
-}
-
-function allocateDurations(weights: number[], targetTotal: number): number[] {
-  if (weights.length === 0) {
-    return [];
-  }
-
-  const minimumTotal = weights.length * MIN_SCENE_DURATION_SECONDS;
-  if (targetTotal < minimumTotal) {
-    throw new Error(
-      `Target total duration must allow at least ${MIN_SCENE_DURATION_SECONDS} seconds per scene.`
-    );
-  }
-
-  const normalizedWeights = weights.map((weight) => Math.max(1, Math.floor(weight)));
-  const remainingDuration = targetTotal - minimumTotal;
-
-  if (remainingDuration === 0) {
-    return Array.from({ length: weights.length }, () => MIN_SCENE_DURATION_SECONDS);
-  }
-
-  const weightTotal = normalizedWeights.reduce((sum, weight) => sum + weight, 0);
-  const allocations = normalizedWeights.map((weight, index) => {
-    const exact = (remainingDuration * weight) / weightTotal;
-    const value = Math.floor(exact);
-    return {
-      index,
-      value,
-      fraction: exact - value,
-    };
-  });
-
-  let leftover = remainingDuration - allocations.reduce((sum, item) => sum + item.value, 0);
-  const prioritized = [...allocations].sort((left, right) => {
-    if (right.fraction !== left.fraction) {
-      return right.fraction - left.fraction;
-    }
-
-    return left.index - right.index;
-  });
-
-  let cursor = 0;
-  while (leftover > 0) {
-    prioritized[cursor % prioritized.length].value += 1;
-    leftover -= 1;
-    cursor += 1;
-  }
-
-  return allocations.map((item) => MIN_SCENE_DURATION_SECONDS + item.value);
-}
-
-function resolveTargetDurationSeconds(
-  sceneTexts: string[],
-  maxDurationSeconds: number,
-  requestedTotalDurationSeconds: number | null = null
-): number {
-  const minimumDurationSeconds = Math.max(1, sceneTexts.length) * MIN_SCENE_DURATION_SECONDS;
-  const estimatedNarrationSeconds = estimateNarrationDurationSeconds(sceneTexts);
-  const naturalDurationSeconds = Math.max(
-    minimumDurationSeconds,
-    Math.ceil(estimatedNarrationSeconds + 2)
-  );
-  const requestedDurationSeconds =
-    typeof requestedTotalDurationSeconds === 'number' &&
-    Number.isFinite(requestedTotalDurationSeconds)
-      ? Math.max(minimumDurationSeconds, Math.round(requestedTotalDurationSeconds))
-      : null;
-
-  return Math.min(
-    maxDurationSeconds,
-    requestedDurationSeconds
-      ? Math.min(requestedDurationSeconds, naturalDurationSeconds)
-      : naturalDurationSeconds
-  );
-}
-
-function validateScriptTiming(scriptPackage: ScriptPackage, profile: ContentProfile): void {
-  const estimatedNarrationSeconds = estimateNarrationDurationSeconds(
-    scriptPackage.scenes.map((scene) => scene.text)
-  );
-  const budgetAllowanceSeconds = getNarrationOvershootAllowanceSeconds(profile.maxDurationSeconds);
-  const minimumNarrationSeconds = Math.max(
-    scriptPackage.scenes.length * 2.5,
-    Math.round(scriptPackage.totalDurationSeconds * 0.65)
-  );
-
-  if (estimatedNarrationSeconds > profile.maxDurationSeconds + budgetAllowanceSeconds) {
-    throw new Error(
-      `Gemini response exceeds the duration budget by ${Math.ceil(
-        estimatedNarrationSeconds - profile.maxDurationSeconds
-      )} seconds. Regenerate the script.`
-    );
-  }
-
-  if (estimatedNarrationSeconds < minimumNarrationSeconds) {
-    throw new Error(
-      `Script underfills the runtime budget by ${Math.ceil(
-        minimumNarrationSeconds - estimatedNarrationSeconds
-      )} seconds. Regenerate the script with fuller but still concrete narration.`
-    );
-  }
-}
-
-function validateScriptDirectionQuality(
-  scriptPackage: ScriptPackage,
-  contentBrief: ContentBrief | null
-): void {
-  const lowerSceneTexts = scriptPackage.scenes.map((scene) => scene.text.toLowerCase());
-  if (new Set(lowerSceneTexts).size <= Math.max(2, Math.floor(scriptPackage.scenes.length * 0.6))) {
-    throw new Error('Script repeats too much and lacks scene-to-scene progression.');
-  }
-
-  for (const scene of scriptPackage.scenes) {
-    if (GENERIC_FILLER_PATTERNS.some((pattern) => pattern.test(scene.text))) {
-      throw new Error('Script contains generic filler language and must be more concrete.');
-    }
-    if (JARGON_HEAVY_PATTERN.test(scene.text)) {
-      throw new Error(
-        'Script uses jargon-heavy language and must be rewritten in simpler English.'
-      );
-    }
-    if (ROBOTIC_TRANSITION_PATTERN.test(scene.text)) {
-      throw new Error('Script sounds robotic and must use more natural spoken phrasing.');
-    }
-    if (AI_CLICHE_PATTERN.test(scene.text)) {
-      throw new Error('Script uses generic AI-style phrasing and needs a more human rewrite.');
-    }
-    if (
-      INTERNAL_FALLBACK_PATTERN.test(scene.text) ||
-      INTERNAL_FALLBACK_PATTERN.test(scene.visualQuery)
-    ) {
-      throw new Error(
-        'Script contains internal fallback placeholder language and must be regenerated.'
-      );
-    }
-    if (GENERIC_ANY_TOPIC_PATTERN.test(scene.text)) {
-      throw new Error('Script sounds interchangeable and must be rewritten with sharper detail.');
-    }
-  }
-
-  const openingScene = scriptPackage.scenes[0];
-  if (openingScene && BORING_SCENE_OPENING_PATTERN.test(openingScene.text)) {
-    throw new Error('Opening scene is too generic and needs a stronger hook.');
-  }
-
-  const nonFinalScenes = scriptPackage.scenes.slice(
-    1,
-    Math.max(2, scriptPackage.scenes.length - 1)
-  );
-  const hasConcreteDemo = nonFinalScenes.some((scene) => hasConcreteSceneSignal(scene.text));
-  if (!hasConcreteDemo) {
-    throw new Error('Script must include at least one practical comparison or concrete example.');
-  }
-
-  if (contentBrief?.storyAngle) {
-    const fullText = scriptPackage.scenes.map((scene) => scene.text).join(' ');
-    const hookTokens = contentBrief.storyAngle.coreHook
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((token) => token.length > 4);
-    const matchedHookTokens = hookTokens.filter((token) => fullText.toLowerCase().includes(token));
-    if (matchedHookTokens.length === 0) {
-      throw new Error('Script ignored the planned story angle and needs a sharper editorial pass.');
-    }
-  }
-
-  if (contentBrief?.exactEvidenceRequired) {
-    const hasAnchoredScene = scriptPackage.scenes.some(
-      (scene) =>
-        contentBrief.keyEntities.some((entity) =>
-          scene.text.toLowerCase().includes(entity.toLowerCase())
-        ) ||
-        contentBrief.evidence.items.some((item) =>
-          item.title
-            .toLowerCase()
-            .split(/\s+/)
-            .filter((token) => token.length > 4)
-            .some((token) => scene.text.toLowerCase().includes(token))
-        )
-    );
-
-    if (!hasAnchoredScene) {
-      throw new Error('Factual script is not anchored strongly enough to real evidence.');
-    }
-
-    for (const scene of scriptPackage.scenes) {
-      if (FACTUAL_PLACEHOLDER_VISUAL_PATTERN.test(scene.visualQuery)) {
-        throw new Error(
-          'Factual script requested a fake or generic visual instead of an exact visual target.'
-        );
-      }
-    }
-  }
-}
-
-function deriveScenePlan(maxDurationSeconds: number): ScenePlan {
-  if (maxDurationSeconds <= 45) {
-    return { minSceneCount: 3, targetSceneCount: 3, maxSceneCount: 4 };
-  }
-
-  if (maxDurationSeconds <= 75) {
-    return { minSceneCount: 3, targetSceneCount: 4, maxSceneCount: 5 };
-  }
-
-  if (maxDurationSeconds <= 105) {
-    return { minSceneCount: 4, targetSceneCount: 5, maxSceneCount: 6 };
-  }
-
-  if (maxDurationSeconds <= 135) {
-    return { minSceneCount: 5, targetSceneCount: 6, maxSceneCount: 7 };
-  }
-
-  if (maxDurationSeconds <= 165) {
-    return { minSceneCount: 6, targetSceneCount: 7, maxSceneCount: 8 };
-  }
-
-  return { minSceneCount: 6, targetSceneCount: 8, maxSceneCount: 8 };
-}
-
-function hasConcreteSceneSignal(text: string): boolean {
-  return (
-    DIRECT_CONCRETE_DEMO_PATTERN.test(text) ||
-    CONCRETE_ARTIFACT_PATTERN.test(text) ||
-    NEWS_CONCRETE_PATTERN.test(text) ||
-    (ACTIONABLE_VERB_PATTERN.test(text) && QUANTIFIED_DETAIL_PATTERN.test(text)) ||
-    (ACTIONABLE_VERB_PATTERN.test(text) &&
-      /\b(screen|tab|dashboard|calculator|template|report)\b/i.test(text))
-  );
-}
-
-function buildVideoKeywords(values: string[]): string[] {
-  const keywords = new Set<string>();
-
-  for (const value of values) {
-    for (const candidate of splitTagSource(value)) {
-      const keyword = sanitizeVideoKeyword(candidate);
-      if (!keyword) {
-        continue;
-      }
-
-      keywords.add(keyword);
-      if (keywords.size >= MAX_VIDEO_TAGS) {
-        return Array.from(keywords);
-      }
-    }
-  }
-
-  return Array.from(keywords);
-}
-
-function splitTagSource(value: string): string[] {
-  return value
-    .split(/[,;\n|/]+/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
-function sanitizeVideoKeyword(value: string): string | null {
-  const normalized = value
-    .toLowerCase()
-    .trim()
-    .replace(/^#/, '')
-    .replace(/["'`]/g, '')
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (normalized.length === 0) {
-    return null;
-  }
-
-  if (/^(https?|www)\b/i.test(normalized) || normalized.includes('://')) {
-    return null;
-  }
-
-  const words = normalized.split(' ').filter(Boolean);
-  const compressedWords = compressVideoKeywordWords(words);
-  if (compressedWords.length === 0) {
-    return null;
-  }
-
-  const keyword = compressedWords.join(' ').trim();
-  if (keyword.length === 0 || keyword.length > MAX_VIDEO_TAG_LENGTH) {
-    return null;
-  }
-
-  return keyword;
-}
-
-function compressVideoKeywordWords(words: string[]): string[] {
-  const contentWords = words.filter((word) => !VIDEO_TAG_STOPWORDS.has(word));
-  if (contentWords.length > 0) {
-    return contentWords.slice(0, MAX_VIDEO_TAG_WORDS);
-  }
-
-  if (words.length <= MAX_VIDEO_TAG_WORDS) {
-    return words;
-  }
-
-  return words.slice(0, MAX_VIDEO_TAG_WORDS);
 }
 
 function stripCodeFence(input: string): string {

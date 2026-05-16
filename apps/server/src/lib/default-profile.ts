@@ -91,6 +91,8 @@ export function createDefaultContentCategories(): ContentCategory[] {
         'The business move that changes a whole market',
         'What a big earnings surprise really means',
       ],
+      topicHookFormula: 'auto',
+      localContextRequired: false,
     },
     {
       id: 'consumer_tech_and_ai',
@@ -119,6 +121,8 @@ export function createDefaultContentCategories(): ContentCategory[] {
         'The consumer app update people are underestimating',
         'The device or feature that actually changes behavior',
       ],
+      topicHookFormula: 'auto',
+      localContextRequired: false,
     },
     {
       id: 'money_work_and_tools',
@@ -152,6 +156,8 @@ export function createDefaultContentCategories(): ContentCategory[] {
         'The money tool that makes one decision easier',
         'The software comparison worth watching this year',
       ],
+      topicHookFormula: 'auto',
+      localContextRequired: false,
     },
     {
       id: 'big_explainers_and_current_affairs',
@@ -179,6 +185,8 @@ export function createDefaultContentCategories(): ContentCategory[] {
         'The world event everyone is hearing about but not understanding',
         'The policy move with a real business ripple effect',
       ],
+      topicHookFormula: 'auto',
+      localContextRequired: false,
     },
     {
       id: 'history_people_and_power',
@@ -210,6 +218,8 @@ export function createDefaultContentCategories(): ContentCategory[] {
         'The historical decision that changed everything after it looked settled',
         'The leader everyone mentions but few explain correctly',
       ],
+      topicHookFormula: 'auto',
+      localContextRequired: false,
     },
     {
       id: 'practical_life_and_work_tips',
@@ -238,6 +248,8 @@ export function createDefaultContentCategories(): ContentCategory[] {
         'The habit shift that changes work quality fast',
         'The practical system that stops repeat mistakes',
       ],
+      topicHookFormula: 'auto',
+      localContextRequired: false,
     },
   ];
 }

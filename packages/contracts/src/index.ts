@@ -83,6 +83,15 @@ export const CategoryLengthStrategySchema = z.object({
 });
 export type CategoryLengthStrategy = z.infer<typeof CategoryLengthStrategySchema>;
 
+export const TopicHookFormulaSchema = z.enum([
+  'contradiction', // "[X is good]. But [bad outcome]. Here is why."
+  'number',        // "[Specific stat]. That changes how you think about [topic]."
+  'reversal',      // "Everyone believes [assumption]. The data says the opposite."
+  'stakes',        // "By [timeframe], [change]. Most people will not see it coming."
+  'auto',          // Let buildStoryAngle choose based on content type (default)
+]).default('auto');
+export type TopicHookFormula = z.infer<typeof TopicHookFormulaSchema>;
+
 export const ContentCategorySchema = z.object({
   id: normalizedStringSchema,
   label: normalizedStringSchema,
@@ -98,6 +107,10 @@ export const ContentCategorySchema = z.object({
   hashtagStrategy: normalizedStringSchema,
   searchLenses: uniqueStringListSchema,
   exampleTopics: uniqueStringListSchema,
+  /** Override the hook formula used for Scene 1 in this category. Defaults to 'auto'. */
+  topicHookFormula: TopicHookFormulaSchema,
+  /** Whether scripts in this category must reference local/regional context. */
+  localContextRequired: z.boolean().default(false),
 });
 export type ContentCategory = z.infer<typeof ContentCategorySchema>;
 
@@ -164,6 +177,8 @@ export const ScriptPackageSchema = z.object({
   scenes: z.array(SceneSpecSchema).min(1),
   totalDurationSeconds: z.number().positive(),
   dialogue: DialoguePackageSchema.nullable().default(null),
+  /** Topic suggestion for the "watch next" end-screen CTA — triggers binge signal in YouTube algorithm. */
+  nextVideoSuggestion: z.string().nullable().default(null),
 });
 export type ScriptPackage = z.infer<typeof ScriptPackageSchema>;
 

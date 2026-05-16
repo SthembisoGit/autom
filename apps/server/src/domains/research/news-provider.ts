@@ -1,1 +1,1 @@
-export { GoogleNewsRssProvider, createNewsProvider } from '../../providers/news-provider.js';
+export { GoogleNewsRssProvider, createNewsProvider } from './search/google-news-context.js';

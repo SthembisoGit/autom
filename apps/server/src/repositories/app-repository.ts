@@ -495,6 +495,27 @@ export class AppRepository {
     return rows.map((row) => this.mapSchedulerRun(row));
   }
 
+  /**
+   * Returns all topics scheduled or generated across ALL profiles in the last N days.
+   * Used by the scheduler to prevent cross-profile topic duplication — publishing
+   * identical topics across profiles in the same week matches YouTube's "inauthentic
+   * content" enforcement pattern.
+   */
+  listRecentTopicsAcrossProfiles(withinDays = 7): string[] {
+    const cutoff = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000).toISOString();
+    const rows = this.database.connection
+      .prepare(
+        `
+          SELECT DISTINCT topic FROM scheduler_runs
+          WHERE scheduled_for >= ?
+          ORDER BY scheduled_for DESC
+        `
+      )
+      .all(cutoff) as Array<{ topic: string }>;
+
+    return rows.map((row) => row.topic).filter(Boolean);
+  }
+
   listRunningSchedulerRuns(): SchedulerRun[] {
     const rows = this.database.connection
       .prepare(
