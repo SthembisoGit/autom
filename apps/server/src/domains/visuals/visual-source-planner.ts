@@ -153,15 +153,17 @@ function buildPlannerQueries(
         ...desiredVisualQueries,
         scene.visualQuery,
         normalizePlannerQuery(scene.text),
-        ...(factualScene
-          ? []
-          : [
-              `${profile.visualStyle} ${scene.visualQuery}`.trim(),
-              `${profile.niche} ${scene.text}`.replace(/[^\w\s]/g, ' ').trim(),
-            ]),
+        // NOTE: visualStyle and niche are intentionally NOT concatenated into queries.
+        // Doing so creates 200+ character strings that cause Pixabay 400 errors.
+        // The visualQuery field from the script already encodes the intent clearly.
       ].filter((value) => value && value.trim().length > 0)
     )
-  ).slice(0, 5);
+  ).map((q) => {
+    // Hard cap at 100 chars — prevents API 400 errors from long queries.
+    // Also strip trailing standalone numbers (scene order leaking from text).
+    return q.replace(/\s+\d{1,3}\s*$/, '').trim().slice(0, 100);
+  }).filter((q) => q.length >= 4)
+  .slice(0, 5);
 }
 
 function extractSceneSpecificQueries(scene: SceneSpec): string[] {

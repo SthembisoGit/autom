@@ -30,6 +30,13 @@ import {
  */
 
 const ARCHIVE_SEARCH_ENDPOINT = 'https://archive.org/advancedsearch.php';
+
+/**
+ * Process-level cache of Internet Archive identifiers that timed out or failed.
+ * Prevents the same bad identifier from being retried on every scene in a job.
+ * Cleared on process restart (which is fine — fresh run, fresh chance).
+ */
+const FAILED_IDENTIFIER_CACHE = new Set<string>();
 const ARCHIVE_DOWNLOAD_BASE = 'https://archive.org/download';
 const DEFAULT_TIMEOUT_MS = 20_000;
 const PER_QUERY_TIMEOUT_MS = 8_000;
@@ -110,7 +117,15 @@ export class InternetArchiveVisualProvider implements VisualSceneProvider {
         if (!hit.identifier) continue;
         if (candidates.length >= 4) break;
 
-        const fileInfo = await resolveDownloadableFile(hit.identifier).catch(() => null);
+        // Capture identifier as a non-optional const — TypeScript can't narrow
+        // hit.identifier through closure boundaries in .catch() callbacks.
+        const identifier = hit.identifier;
+        if (!identifier) continue;
+
+        // Skip identifiers that already timed out in a previous scene this job
+        if (FAILED_IDENTIFIER_CACHE.has(identifier)) continue;
+
+        const fileInfo = await resolveDownloadableFile(identifier).catch(() => null);
         if (!fileInfo) continue;
 
         const outputPath = join(
@@ -120,6 +135,8 @@ export class InternetArchiveVisualProvider implements VisualSceneProvider {
 
         const downloaded = await downloadWithTimeout(fileInfo.url, PER_QUERY_TIMEOUT_MS).catch(
           (error) => {
+            // Cache this identifier so it's skipped for all remaining scenes in this job
+            FAILED_IDENTIFIER_CACHE.add(identifier);
             warnings.push(
               `Internet Archive download timed out for "${hit.identifier}": ${error instanceof Error ? error.message : 'timeout'}`
             );
