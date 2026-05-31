@@ -660,7 +660,8 @@ function buildGenerationPrompt(
   const scenePlan = deriveScenePlan(profile.maxDurationSeconds);
   const targetWordsTotal = Math.max(
     scenePlan.targetSceneCount * 15,
-    Math.round(profile.maxDurationSeconds * 2.4)
+    // 1.85 wps matches actual TTS output rate — keeps scripts within duration budget.
+    Math.round(profile.maxDurationSeconds * 1.85)
   );
   const targetWordsPerScene = Math.max(
     8,

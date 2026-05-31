@@ -25,7 +25,10 @@ type SubtitleCueDraft = SubtitleCue & {
 const MAX_SUBTITLE_LINE_LENGTH = 32;
 const MAX_SUBTITLE_LINES = 2;
 const MAX_SUBTITLE_CUE_DURATION_SECONDS = 2.5;
-const NARRATION_WORDS_PER_SECOND = 2.2;
+// 1.85 wps matches actual Deepgram/Google Neural TTS output rate.
+// 2.2 was too fast — caused totalDurationSeconds to be underestimated,
+// giving a tiny overshoot budget that real audio consistently exceeded.
+const NARRATION_WORDS_PER_SECOND = 1.85;
 const NARRATION_OVERSHOOT_RATIO = 0.15;
 const NARRATION_OVERSHOOT_MIN_SECONDS = 5;
 

@@ -243,64 +243,22 @@ export class FfmpegRenderer implements MediaRenderer {
     const sceneCount = input.scriptPackage.scenes.length;
     await input.onProgress?.('Concatenating rendered scenes.');
 
-    if (sceneCount <= 1) {
-      // Single scene — simple copy, no transition needed
-      await this.runRenderCommand(
-        'Scene concatenation',
-        input.env.FFMPEG_PATH,
-        [
-          '-y', '-f', 'concat', '-safe', '0', '-i', 'scene-list.txt',
-          '-c:v', 'libx264', '-preset', VIDEO_ENCODING_PRESET,
-          '-pix_fmt', 'yuv420p', '-an', 'assembled.mp4',
-        ],
-        sceneDirectory,
-        renderTimeoutMs
-      );
-    } else {
-      // Multi-scene — build xfade dissolve chain between every pair of scenes.
-      // Each dissolve is 0.25s — subtle enough not to obscure content but enough
-      // to eliminate the jarring hard-cut feel between archival and modern footage.
-      const DISSOLVE_DURATION = 0.25;
-      const sceneNames = input.scriptPackage.scenes.map((_, i) => `scene-${i + 1}.mp4`);
-      const inputs = sceneNames.flatMap((name) => ['-i', name]);
-
-      // Calculate offset for each xfade — offset is the sum of preceding scene
-      // durations minus dissolve overlaps already consumed.
-      let cumulativeOffset = 0;
-      const filterParts: string[] = [];
-
-      // Normalize all inputs to the same framerate and timebase before xfade.
-      // Mixed-framerate inputs (e.g. 25fps stock clips) cause xfade to fail.
-      for (let n = 0; n < sceneNames.length; n++) {
-        filterParts.push(`[${n}:v]fps=${VIDEO_FRAME_RATE},settb=1/${VIDEO_FRAME_RATE * 512}[v${n}norm]`);
-      }
-
-      for (let i = 0; i < sceneNames.length - 1; i++) {
-        const sceneDuration = resolvedSceneTimings[i]?.durationSeconds ?? 5;
-        cumulativeOffset += sceneDuration - DISSOLVE_DURATION;
-        const inputA = i === 0 ? `[v${i}norm]` : `[xf${i - 1}]`;
-        const inputB = `[v${i + 1}norm]`;
-        const outputLabel = i === sceneNames.length - 2 ? '[outv]' : `[xf${i}]`;
-        filterParts.push(
-          `${inputA}${inputB}xfade=transition=fade:duration=${DISSOLVE_DURATION}:offset=${cumulativeOffset.toFixed(3)}${outputLabel}`
-        );
-      }
-
-      await this.runRenderCommand(
-        'Scene concatenation with transitions',
-        input.env.FFMPEG_PATH,
-        [
-          '-y',
-          ...inputs,
-          '-filter_complex', filterParts.join(';'),
-          '-map', '[outv]',
-          '-c:v', 'libx264', '-preset', VIDEO_ENCODING_PRESET,
-          '-pix_fmt', 'yuv420p', '-an', 'assembled.mp4',
-        ],
-        sceneDirectory,
-        renderTimeoutMs
-      );
-    }
+    // Simple concat — reliable and fast for any scene count.
+    // xfade filter_complex was reverted: opening all scenes simultaneously
+    // in one ffmpeg command causes memory exhaustion and hangs on videos
+    // longer than ~3 minutes. Scene-level fade-in (applied per scene during
+    // individual render) already handles the loop seam visually.
+    await this.runRenderCommand(
+      'Scene concatenation',
+      input.env.FFMPEG_PATH,
+      [
+        '-y', '-f', 'concat', '-safe', '0', '-i', 'scene-list.txt',
+        '-c:v', 'libx264', '-preset', VIDEO_ENCODING_PRESET,
+        '-pix_fmt', 'yuv420p', '-an', 'assembled.mp4',
+      ],
+      sceneDirectory,
+      renderTimeoutMs
+    );
     await input.onProgress?.(
       `Render telemetry: scene concatenation completed in ${formatElapsedMs(
         Date.now() - concatStartedAt

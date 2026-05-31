@@ -547,7 +547,8 @@ export class PixabayVisualProvider implements VisualSceneProvider {
       const response = await fetch(
         `${PIXABAY_VIDEO_ENDPOINT}?key=${encodeURIComponent(this.apiKey)}&q=${encodeURIComponent(query)}&per_page=5`,
         {
-          signal: AbortSignal.timeout(8_000),
+          // 4s timeout — Pixabay is consistently slow; fail fast and fall through to Pexels.
+          signal: AbortSignal.timeout(4_000),
         }
       ).catch((error) => {
         if (isAbortError(error)) {
