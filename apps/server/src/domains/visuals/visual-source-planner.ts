@@ -109,12 +109,52 @@ export function classifySceneKind(
   return 'generic_business_or_lifestyle';
 }
 
+const FACTUAL_SCENE_KINDS = new Set<VisualSceneKind>([
+  'recent_news',
+  'named_person_or_event',
+  'historical_topic',
+  'current_shift',
+  'specific_person_or_event',
+  'hidden_number',
+  'myth_reversal',
+  'local_to_global',
+]);
+
 export function isExactVisualMatchRequired(sceneKind: VisualSceneKind): boolean {
-  return (
-    sceneKind === 'recent_news' ||
-    sceneKind === 'named_person_or_event' ||
-    sceneKind === 'historical_topic'
-  );
+  return FACTUAL_SCENE_KINDS.has(sceneKind);
+}
+
+export function broadenVisualScenePlan(
+  plan: VisualScenePlan,
+  scene: SceneSpec
+): VisualScenePlan {
+  const entityQueries = plan.keyEntities.flatMap((entity) => [
+    entity,
+    `${entity} portrait`,
+    `${entity} archive`,
+  ]);
+  const tokenQuery = normalizePlannerQuery(scene.visualQuery).split(/\s+/).slice(0, 4).join(' ');
+
+  return {
+    ...plan,
+    queries: Array.from(
+      new Set(
+        [...plan.queries, ...entityQueries, tokenQuery, scene.visualQuery]
+          .map((query) => query.trim().slice(0, 100))
+          .filter((query) => query.length >= 3)
+      )
+    ).slice(0, 8),
+    exactMatchRequired: false,
+    allowStockFallback: true,
+    preferredProviders: Array.from(
+      new Set<VisualProviderFamily>([
+        ...plan.preferredProviders,
+        'pexels',
+        'pixabay',
+        'wikimedia',
+      ])
+    ),
+  };
 }
 
 export function extractCapitalizedEntities(value: string): string[] {
@@ -163,7 +203,7 @@ function buildPlannerQueries(
     // Also strip trailing standalone numbers (scene order leaking from text).
     return q.replace(/\s+\d{1,3}\s*$/, '').trim().slice(0, 100);
   }).filter((q) => q.length >= 4)
-  .slice(0, 5);
+  .slice(0, 8);
 }
 
 function extractSceneSpecificQueries(scene: SceneSpec): string[] {
@@ -204,22 +244,27 @@ function extractVisualEntities(scene: SceneSpec, contentBrief: ContentBrief | nu
 function resolveProviderFamilies(sceneKind: VisualSceneKind): VisualProviderFamily[] {
   switch (sceneKind) {
     case 'recent_news':
-      // News context first, then Internet Archive for historical context footage
+    case 'current_shift':
+    case 'local_to_global':
       return ['news_context', 'internet_archive', 'wikimedia', 'pixabay', 'pexels'];
     case 'historical_topic':
-      // Internet Archive has the best historical footage — Prelinger, NARA, newsreels
+    case 'myth_reversal':
       return ['internet_archive', 'nasa', 'wikimedia', 'pixabay', 'pexels'];
     case 'named_person_or_event':
-      // Wikimedia for well-documented public figures; Archive as depth fallback
-      return ['wikimedia', 'internet_archive', 'pixabay', 'pexels'];
+    case 'specific_person_or_event':
+      return ['wikimedia', 'internet_archive', 'news_context', 'pixabay', 'pexels'];
+    case 'hidden_number':
+    case 'money_work_tools':
+    case 'product_or_tool_demo':
+      return ['pixabay', 'pexels', 'wikimedia', 'internet_archive'];
+    case 'visual_story':
+      return ['wikimedia', 'internet_archive', 'nasa', 'pexels', 'pixabay'];
     case 'generic_business_or_lifestyle':
       return ['pexels', 'pixabay', 'wikimedia'];
-    case 'product_or_tool_demo':
-      return ['pixabay', 'pexels', 'wikimedia'];
     case 'place_or_institution':
       return ['wikimedia', 'internet_archive', 'pixabay', 'pexels'];
     default:
-      return ['pexels', 'pixabay', 'wikimedia'];
+      return ['pexels', 'pixabay', 'wikimedia', 'internet_archive'];
   }
 }
 

@@ -32,23 +32,26 @@ export function chooseBestVisualCandidate(
   if (plan.exactMatchRequired) {
     const relevantFallback = candidatePool.find(
       (candidate) =>
-        candidate.score >= 14 &&
+        candidate.score >= 8 &&
         (candidate.providerFamily === 'wikimedia' ||
           candidate.providerFamily === 'news_context' ||
-          candidate.matchedTerms.length >= 2)
+          candidate.providerFamily === 'internet_archive' ||
+          candidate.providerFamily === 'nasa' ||
+          candidate.matchedTerms.length >= 2 ||
+          (plan.allowStockFallback && candidate.score >= 10))
     );
-    return relevantFallback
-      ? {
-          ...relevantFallback,
-          asset: {
-            ...relevantFallback.asset,
-            matchQuality: 'relevant',
-            reuseStatus: forcedReuse ? 'forced_reuse' : 'unique',
-          },
-          forcedReuse,
-          reuseBlockedCount: duplicateCount,
-        }
-      : null;
+    if (relevantFallback) {
+      return {
+        ...relevantFallback,
+        asset: {
+          ...relevantFallback.asset,
+          matchQuality: 'relevant',
+          reuseStatus: forcedReuse ? 'forced_reuse' : 'unique',
+        },
+        forcedReuse,
+        reuseBlockedCount: duplicateCount,
+      };
+    }
   }
 
   const fallback = candidatePool[0] ?? null;
@@ -57,7 +60,12 @@ export function chooseBestVisualCandidate(
         ...fallback,
         asset: {
           ...fallback.asset,
-          matchQuality: fallback.score >= 14 ? 'relevant' : 'fallback',
+          matchQuality:
+            fallback.exactEntityMatch || fallback.score >= 12
+              ? 'relevant'
+              : fallback.score >= 6
+                ? 'relevant'
+                : 'fallback',
           reuseStatus: forcedReuse ? 'forced_reuse' : 'unique',
         },
         forcedReuse,
