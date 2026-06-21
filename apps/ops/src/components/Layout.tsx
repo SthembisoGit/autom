@@ -79,7 +79,7 @@ export function LayoutShell({ initialCollapsed }: { initialCollapsed?: boolean }
           <div className="sidebar-summary card">
             <p className="eyebrow" style={{ marginBottom: 4 }}>Mode</p>
             <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
-              Local-first — review render, then publish.
+              Fully automatic — generate, render, and publish with no review step.
             </p>
           </div>
         </div>

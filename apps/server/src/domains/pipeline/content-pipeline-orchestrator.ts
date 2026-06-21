@@ -2,6 +2,13 @@ import type { AppEnv } from '@autom/config';
 import type { ContentCategory, ContentProfile } from '@autom/contracts';
 
 import type { NewsProvider, RerankProvider, SearchProvider } from '../../lib/types.js';
+import {
+  autoReviewOpportunity,
+  buildContentOpportunity,
+  buildEditorialBrief,
+  resolveOpportunityContentType,
+  stressTestOpportunity,
+} from '../ideation/opportunity-engine.js';
 import { buildStoryAngle } from '../editorial/story-angle-planner.js';
 import {
   ResearchEvidenceService,
@@ -26,13 +33,21 @@ export class ContentPipelineOrchestrator {
       profile,
       `${buildTopicSelectionSeed(profile, new Date())}:${topic}:${research.newsContext?.title ?? ''}`
     );
-    const contentType = inferContentType(
+    const baseContentType = inferContentType(
       profile,
       topic,
       research.newsContext,
       keyEntities,
       category
     );
+    const contentType = resolveOpportunityContentType({
+      baseContentType,
+      topic,
+      category,
+      newsContext: research.newsContext,
+      evidence: research.evidence.items,
+      visualLeadCount: keyEntities.length,
+    });
     const exactEvidenceRequired = isExactEvidenceRequired(contentType);
     const monetizationScore = buildMonetizationScore(
       category,
@@ -47,6 +62,35 @@ export class ContentPipelineOrchestrator {
       research.evidence.items.map((item) => item.title),
       research.newsContext
     );
+    const desiredVisuals = buildDesiredVisuals(topic, research.newsContext, keyEntities);
+    const opportunity = buildContentOpportunity({
+      topic,
+      category,
+      contentType,
+      evidence: research.evidence.items,
+      newsContext: research.newsContext,
+      monetizationScore,
+      storyAngle,
+      keyEntities,
+      desiredVisuals,
+    });
+    const opportunityStressTest = stressTestOpportunity(opportunity);
+    const editorialBrief = buildEditorialBrief({
+      topic,
+      contentType,
+      opportunity,
+      stressTest: opportunityStressTest,
+      storyAngle,
+      desiredVisuals,
+      callToActionStyle: profile.callToActionStyle,
+    });
+    const autoReview = autoReviewOpportunity({
+      opportunity,
+      stressTest: opportunityStressTest,
+      editorialBrief,
+      verificationStatus: research.verificationStatus,
+      exactEvidenceRequired,
+    });
 
     return {
       topic,
@@ -62,7 +106,7 @@ export class ContentPipelineOrchestrator {
         )
       ),
       keyEntities,
-      desiredVisuals: buildDesiredVisuals(topic, research.newsContext, keyEntities),
+      desiredVisuals,
       toneGuidance: buildToneGuidance(profile, research.newsContext, category, storyAngle),
       evidence: research.evidence,
       monetizationScore,
@@ -81,6 +125,10 @@ export class ContentPipelineOrchestrator {
             reasoning: category.topicGenerationRules,
           }
         : null,
+      opportunity,
+      opportunityStressTest,
+      editorialBrief,
+      autoReview,
       verificationStatus: research.verificationStatus,
       exactEvidenceRequired,
       searchProvider: research.searchProvider,
@@ -164,7 +212,11 @@ function isExactEvidenceRequired(contentType: ContentBrief['contentType']): bool
   return (
     contentType === 'recent_news' ||
     contentType === 'named_person_or_event' ||
-    contentType === 'historical_topic'
+    contentType === 'historical_topic' ||
+    contentType === 'current_shift' ||
+    contentType === 'specific_person_or_event' ||
+    contentType === 'hidden_number' ||
+    contentType === 'myth_reversal'
   );
 }
 

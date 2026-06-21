@@ -32,6 +32,7 @@ function buildTestEnv(
     SCHEDULER_POLL_INTERVAL_SECONDS: '30',
     SCHEDULER_MAX_RETRIES: '2',
     SCHEDULER_RETRY_BASE_SECONDS: '60',
+    AUTO_PUBLISH_ENABLED: 'true',
     YOUTUBE_CLIENT_ID: '',
     YOUTUBE_CLIENT_SECRET: '',
     YOUTUBE_REDIRECT_URI: '',
@@ -432,7 +433,7 @@ test('server workflow creates, reviews, and publishes a job', async () => {
       status: string;
       scriptMetadata: { provider: string; promptVersion: string };
     };
-    assert.equal(createdJob.status, 'review_pending');
+    assert.equal(createdJob.status, 'published');
     assert.equal(createdJob.scriptMetadata.provider, 'local');
     assert.equal(createdJob.scriptMetadata.promptVersion, 'local-script-template-v1');
     assert.equal(createResponse.json().reviewPackage.renderBundle.thumbnailPath !== null, true);
@@ -465,30 +466,20 @@ test('server workflow creates, reviews, and publishes a job', async () => {
     });
     assert.equal(monitorResponse.statusCode, 200);
     assert.equal(monitorResponse.json().active[0].job.id, createdJob.id);
-    assert.equal(monitorResponse.json().active[0].progress.stage, 'ready_for_review');
+    assert.notEqual(monitorResponse.json().active[0].progress.stage, 'ready_for_review');
 
     const detailResponse = await app.inject({
       method: 'GET',
       url: `/jobs/${createdJob.id}`,
     });
     assert.equal(detailResponse.statusCode, 200);
-    assert.equal(detailResponse.json().progress.stage, 'ready_for_review');
+    assert.equal(detailResponse.json().job.status, 'published');
 
-    const reviewResponse = await app.inject({
-      method: 'POST',
-      url: `/reviews/${createdJob.id}/approve`,
-      payload: {
-        note: 'Looks ready for the queue.',
-      },
-    });
-    assert.equal(reviewResponse.statusCode, 200);
-    assert.equal(reviewResponse.json().status, 'approved');
-
-    const localManifestBeforePublishResponse = await app.inject({
+    const localManifestResponse = await app.inject({
       method: 'GET',
       url: `/jobs/${createdJob.id}/artifacts/publications/local/manifest`,
     });
-    assert.equal(localManifestBeforePublishResponse.statusCode, 404);
+    assert.equal(localManifestResponse.statusCode, 200);
 
     const publishResponse = await app.inject({
       method: 'POST',

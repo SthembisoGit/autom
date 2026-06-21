@@ -1,7 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 
 import type { AppEnv } from '@autom/config';
-import type { ContentProfile, SchedulerOverview, SchedulerRun } from '@autom/contracts';
+import type { ContentProfile, GenerationJob, SchedulerOverview, SchedulerRun } from '@autom/contracts';
 import { SchedulerOverviewSchema } from '@autom/contracts';
 
 import {
@@ -268,16 +268,16 @@ export class SchedulerService {
         topic: run.topic,
       });
 
-      if (job.status === 'review_pending') {
+      if (isSchedulerPipelineComplete(job.status)) {
         this.repository.completeSchedulerRun(run.id, job.id);
         this.auditService.info(
           job.id,
-          `Scheduled run ${run.id} completed and created job ${job.id}.`
+          `Scheduled run ${run.id} completed and created job ${job.id} (${job.status}).`
         );
         return 'completed';
       }
 
-      const message = job.errorMessage ?? `Scheduled job ${job.id} failed before review.`;
+      const message = job.errorMessage ?? `Scheduled job ${job.id} failed before completion.`;
       return this.handleFailedRun(run, message, currentTime);
     } catch (error) {
       if (error instanceof AppError && error.statusCode === 409) {
@@ -406,6 +406,10 @@ function resolveSchedulerStartAt(
   }
 
   return profileResumeAt > lastTickCompletedAt ? profileResumeAt : lastTickCompletedAt;
+}
+
+function isSchedulerPipelineComplete(status: GenerationJob['status']): boolean {
+  return status === 'review_pending' || status === 'published' || status === 'publish_pending';
 }
 
 function resolveInitialDueSlots(expression: string, now: Date): Date[] {

@@ -70,12 +70,23 @@ export function DashboardPage() {
       { label: 'Enabled', value: summary?.enabledProfiles ?? 0, icon: '✓', tone: 'success' as const },
       { label: 'Drafting', value: summary?.draftJobs ?? 0, icon: '⟳', tone: 'default' as const },
       {
-        label: 'Pending review',
-        value: summary?.reviewPendingJobs ?? 0,
-        icon: '◉',
-        tone: ((summary?.reviewPendingJobs ?? 0) > 0 ? 'warning' : 'default') as 'warning' | 'default',
+        label: 'Published',
+        value: summary?.publishedJobs ?? 0,
+        icon: '↑',
+        tone: 'success' as const,
       },
-      { label: 'Published', value: summary?.publishedJobs ?? 0, icon: '↑', tone: 'success' as const },
+      ...(summary?.autoPublishEnabled
+        ? []
+        : [
+            {
+              label: 'Pending review',
+              value: summary?.reviewPendingJobs ?? 0,
+              icon: '◉',
+              tone: ((summary?.reviewPendingJobs ?? 0) > 0 ? 'warning' : 'default') as
+                | 'warning'
+                | 'default',
+            },
+          ]),
     ],
     [summary]
   );
@@ -191,7 +202,7 @@ export function DashboardContent({
   return (
     <div className="stack">
       {/* Action-required banners — highest visual priority */}
-      {(summary?.reviewPendingJobs ?? 0) > 0 ? (
+      {!summary?.autoPublishEnabled && (summary?.reviewPendingJobs ?? 0) > 0 ? (
         <div className="action-required-banner">
           <div className="action-required-content">
             <div className="action-required-icon" aria-hidden="true">⚠</div>
@@ -221,7 +232,10 @@ export function DashboardContent({
         </div>
       ) : null}
 
-      {summary && Object.values(summary).every((metricValue) => metricValue === 0) ? (
+      {summary &&
+      summary.draftJobs === 0 &&
+      summary.reviewPendingJobs === 0 &&
+      summary.publishedJobs === 0 ? (
         <StatePanel
           description="Profiles are configured, but no content runs have been generated yet."
           title="The system is ready for its first workload"
@@ -267,25 +281,38 @@ export function DashboardContent({
               <p className="eyebrow">Attention</p>
               <h3>Urgent next actions</h3>
               <p className="card-intro muted">
-                Keep the overview short. Handle retries and approvals from their dedicated pages.
+                {summary?.autoPublishEnabled
+                  ? 'Runs publish automatically after render. Handle failures from the runs page.'
+                  : 'Keep the overview short. Handle retries and approvals from their dedicated pages.'}
               </p>
             </div>
           </div>
 
           <div className="stack stack-tight">
-            <div className="summary-row">
-              <div>
-                <p className="summary-row-title">Pending review</p>
-                <p className="muted">
-                  {summary?.reviewPendingJobs
-                    ? `${summary.reviewPendingJobs} run(s) waiting for approval.`
-                    : 'No runs waiting in the review queue.'}
-                </p>
+            {summary?.autoPublishEnabled ? (
+              <div className="summary-row">
+                <div>
+                  <p className="summary-row-title">Auto-publish</p>
+                  <p className="muted">
+                    Enabled. Completed runs move straight from render to publish without operator approval.
+                  </p>
+                </div>
               </div>
-              <Link className="button button-secondary" to="/reviews">
-                Open review
-              </Link>
-            </div>
+            ) : (
+              <div className="summary-row">
+                <div>
+                  <p className="summary-row-title">Pending review</p>
+                  <p className="muted">
+                    {summary?.reviewPendingJobs
+                      ? `${summary.reviewPendingJobs} run(s) waiting for approval.`
+                      : 'No runs waiting in the review queue.'}
+                  </p>
+                </div>
+                <Link className="button button-secondary" to="/reviews">
+                  Open review
+                </Link>
+              </div>
+            )}
 
             <div className="summary-row">
               <div>

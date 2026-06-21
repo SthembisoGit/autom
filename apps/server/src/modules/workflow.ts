@@ -13,8 +13,10 @@ import type {
   VoiceProvider,
 } from '../lib/types.js';
 import type { AppRepository } from '../repositories/app-repository.js';
+import { nowIso } from '../lib/time.js';
 import type { AuditService } from './audit.js';
 import type { ProfilesService } from './profiles.js';
+import type { PublicationsService } from './publications.js';
 
 class OperatorCancelledError extends Error {
   constructor(message = 'Cancelled by operator.') {
@@ -34,7 +36,8 @@ export class WorkflowService {
     private readonly voiceProvider: VoiceProvider,
     private readonly transcriptionProvider: TranscriptionProvider,
     private readonly visualProvider: VisualProvider,
-    private readonly mediaRenderer: MediaRenderer
+    private readonly mediaRenderer: MediaRenderer,
+    private readonly publicationsService: PublicationsService
   ) {}
 
   async generate(input: CreateJobRequest): Promise<GenerationJob> {
@@ -189,13 +192,27 @@ export class WorkflowService {
       this.auditService.info(job.id, 'Review package rendered.');
       this.assertNotCancelled(job.id);
 
-      return this.repository.updateJob({
+      const renderedJob = this.repository.updateJob({
         ...workingJob,
         status: 'review_pending',
         manualClipBundle: null,
         reviewPackage: reviewPackageWithSelectionOutcomes,
         errorMessage: null,
       });
+
+      if (!this.env.AUTO_PUBLISH_ENABLED) {
+        return renderedJob;
+      }
+
+      this.auditService.info(job.id, 'Auto-publish enabled; skipping human review.');
+      const approvedJob = this.repository.updateJob({
+        ...renderedJob,
+        status: 'approved',
+        updatedAt: nowIso(),
+      });
+      this.auditService.info(job.id, 'Run auto-approved for publishing.');
+
+      return this.publicationsService.publish(approvedJob.id);
     } catch (error) {
       if (error instanceof OperatorCancelledError) {
         await cleanupJobArtifacts(this.runtimePaths, job.id);

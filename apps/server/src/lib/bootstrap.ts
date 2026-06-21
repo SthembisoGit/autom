@@ -137,7 +137,8 @@ function createServices(
     options?.transcriptionProvider ?? createTranscriptionProvider(env),
     options?.visualProvider ?? createVisualProvider(env),
     options?.mediaRenderer ??
-      (env.NODE_ENV === 'test' ? new StubRenderer() : new FfmpegRenderer(commandRunner))
+      (env.NODE_ENV === 'test' ? new StubRenderer() : new FfmpegRenderer(commandRunner)),
+    publicationsService
   );
   const schedulerService = new SchedulerService(
     env,
@@ -147,7 +148,7 @@ function createServices(
     auditService,
     newsProvider
   );
-  const jobsService = new JobsService(repository, auditService, workflowService);
+  const jobsService = new JobsService(env, repository, auditService, workflowService);
 
   return {
     auditService,

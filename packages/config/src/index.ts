@@ -55,6 +55,7 @@ export const AppEnvSchema = z.object({
   SCHEDULER_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).default(30),
   SCHEDULER_MAX_RETRIES: z.coerce.number().int().min(1).max(10).default(3),
   SCHEDULER_RETRY_BASE_SECONDS: z.coerce.number().int().min(15).default(300),
+  AUTO_PUBLISH_ENABLED: booleanFromEnvSchema.default(true),
   ENABLED_PUBLISHER_PLATFORMS: z.string().optional(),
   YOUTUBE_CLIENT_ID: z.string().optional(),
   YOUTUBE_CLIENT_SECRET: z.string().optional(),

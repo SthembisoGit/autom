@@ -1,3 +1,4 @@
+import type { AppEnv } from '@autom/config';
 import type {
   DashboardSummary,
   GenerationJob,
@@ -19,6 +20,7 @@ import type { WorkflowService } from './workflow.js';
 
 export class JobsService {
   constructor(
+    private readonly env: AppEnv,
     private readonly repository: AppRepository,
     private readonly auditService: AuditService,
     private readonly workflowService: WorkflowService
@@ -70,7 +72,10 @@ export class JobsService {
   }
 
   getDashboardSummary(): DashboardSummary {
-    return this.repository.getDashboardSummary();
+    return {
+      ...this.repository.getDashboardSummary(),
+      autoPublishEnabled: this.env.AUTO_PUBLISH_ENABLED,
+    };
   }
 
   async retry(jobId: string): Promise<GenerationJob> {

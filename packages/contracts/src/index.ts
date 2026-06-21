@@ -276,6 +276,13 @@ export const VisualSelectionOutcomeSchema = z.object({
     'place_or_institution',
     'generic_business_or_lifestyle',
     'product_or_tool_demo',
+    'current_shift',
+    'specific_person_or_event',
+    'money_work_tools',
+    'local_to_global',
+    'hidden_number',
+    'myth_reversal',
+    'visual_story',
   ]),
   exactMatchRequired: z.boolean().default(false),
   status: VisualSelectionStatusSchema,
@@ -425,6 +432,27 @@ export const ScriptGenerationMetadataSchema = z.object({
   monetizationScore: z.number().nonnegative().nullable().default(null),
   storyAngle: z.string().nullable().default(null),
   hookStyle: z.string().nullable().default(null),
+  opportunityTitle: z.string().nullable().default(null),
+  opportunityAudience: z.string().nullable().default(null),
+  opportunityWhyNow: z.string().nullable().default(null),
+  opportunitySpecificLens: z.string().nullable().default(null),
+  opportunityOriginalityClaim: z.string().nullable().default(null),
+  opportunityRiskFlags: z.array(z.string()).default([]),
+  opportunityRecommendationReason: z.string().nullable().default(null),
+  opportunityStressScore: z.number().nonnegative().nullable().default(null),
+  opportunityRejectionReasons: z.array(z.string()).default([]),
+  editorialHook: z.string().nullable().default(null),
+  editorialFirstTenSeconds: z.string().nullable().default(null),
+  editorialVisualPromise: z.string().nullable().default(null),
+  editorialStoryBeats: z.array(z.string()).default([]),
+  autoReviewScore: z.number().nonnegative().nullable().default(null),
+  autoReviewPassed: z.boolean().nullable().default(null),
+  autoReviewRecommendation: z
+    .enum(['auto_publish', 'hold_for_review', 'reject'])
+    .nullable()
+    .default(null),
+  autoReviewBlockingIssues: z.array(z.string()).default([]),
+  autoReviewWarningIssues: z.array(z.string()).default([]),
   warnings: z.array(z.string()).default([]),
 });
 export type ScriptGenerationMetadata = z.infer<typeof ScriptGenerationMetadataSchema>;
@@ -666,5 +694,6 @@ export const DashboardSummarySchema = z.object({
   draftJobs: z.number().int().nonnegative(),
   reviewPendingJobs: z.number().int().nonnegative(),
   publishedJobs: z.number().int().nonnegative(),
+  autoPublishEnabled: z.boolean().default(true),
 });
 export type DashboardSummary = z.infer<typeof DashboardSummarySchema>;

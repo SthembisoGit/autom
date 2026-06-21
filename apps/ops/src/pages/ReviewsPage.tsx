@@ -189,7 +189,7 @@ export function ReviewsContent({
   if (jobs.length === 0) {
     return (
       <StatePanel
-        description="Approved work will appear here after generation completes."
+        description="Auto-publish is enabled. Jobs move from generation to publish without waiting in this queue."
         title="No jobs are waiting for review"
         tone="info"
       />
